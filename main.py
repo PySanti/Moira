@@ -1,5 +1,7 @@
-from utils.build_weather_features import build_weather_features
+from utils.build_climate_data import get_weather_features
 
-a,b = build_weather_features('new york', '11-11-25')
-print(a)
-print(b)
+data = get_weather_features('new york','11-06-10')
+
+for k,v in data.items():
+    print(k,v)
+
