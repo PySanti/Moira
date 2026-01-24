@@ -51,7 +51,7 @@ Empezare con una cantidad reducida de features para ampliar posiblemente en el f
 
 Version inicial :
 
-```
+```python
 import requests
 import pandas as pd
 import numpy as np
