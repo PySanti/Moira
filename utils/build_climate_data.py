@@ -7,13 +7,7 @@ import math
 def get_weather_features(city: str, date_str: str):
     """
     Obtiene features meteorológicas para una ciudad y fecha específicas.
-    
-    Args:
-        city (str): 'new york', 'chicago', 'atlanta', 'seul', 'londres'
-        date_str (str): Fecha en formato 'dd-mm-aa' (ej: '25-01-23')
-        
-    Returns:
-        dict: Diccionario con todas las features calculadas.
+    Incluye la temperatura máxima del día siguiente (label) si está disponible.
     """
     
     # 1. Configuración de Coordenadas (Lat/Lon)
@@ -30,17 +24,18 @@ def get_weather_features(city: str, date_str: str):
         raise ValueError(f"Ciudad no soportada. Use: {list(city_coords.keys())}")
 
     # 2. Gestión de Fechas
-    # Convertimos dd-mm-aa a objeto datetime.
-    # Nota: %y asume el siglo actual o pasado según el estándar (20xx).
     target_date = datetime.strptime(date_str, "%d-%m-%y")
     
-    # IMPORTANTE: Para calcular medias móviles de 3 días (MA_Tmax_3d) y deltas,
-    # necesitamos datos de días anteriores. Pediremos 5 días atrás para tener margen.
+    # Calculamos el día siguiente (x+1) para pedirlo a la API
+    next_day_date = target_date + timedelta(days=1)
+    
+    # Pedimos 5 días atrás para el contexto (rolling windows)
     start_date = target_date - timedelta(days=5)
     
     # Formato para la API (YYYY-MM-DD)
     api_start = start_date.strftime("%Y-%m-%d")
-    api_end = target_date.strftime("%Y-%m-%d")
+    # MODIFICACIÓN: Extendemos el final de la petición hasta el día siguiente (x+1)
+    api_end = next_day_date.strftime("%Y-%m-%d")
 
     # 3. Llamada a la API (Open-Meteo Archive)
     url = "https://archive-api.open-meteo.com/v1/archive"
@@ -49,7 +44,6 @@ def get_weather_features(city: str, date_str: str):
         "longitude": city_coords[city_key]['lon'],
         "start_date": api_start,
         "end_date": api_end,
-        # Solicitamos las variables base necesarias para tus cálculos
         "daily": [
             "temperature_2m_max",
             "temperature_2m_min",
@@ -57,7 +51,7 @@ def get_weather_features(city: str, date_str: str):
             "precipitation_sum",
             "wind_speed_10m_mean",
             "wind_direction_10m_dominant",
-            "surface_pressure_mean", # Presión a nivel de superficie (o sealevel si prefieres)
+            "surface_pressure_mean",
             "relative_humidity_2m_mean",
             "cloud_cover_mean",
             "dew_point_2m_mean"
@@ -76,11 +70,9 @@ def get_weather_features(city: str, date_str: str):
     daily_data = data['daily']
     df = pd.DataFrame(daily_data)
     df['time'] = pd.to_datetime(df['time'])
-    df = df.sort_values('time') # Aseguramos orden cronológico
+    df = df.sort_values('time')
 
-    # --- CÁLCULO DE FEATURES ---
-    
-    # Renombrar columnas para facilitar manejo
+    # Renombrar columnas
     df = df.rename(columns={
         'temperature_2m_max': 'Tmax',
         'temperature_2m_min': 'Tmin',
@@ -94,41 +86,50 @@ def get_weather_features(city: str, date_str: str):
         'precipitation_sum': 'Precip'
     })
 
-    # Features derivadas (Calculadas sobre todo el vector de 5 días)
-    
-    # ΔTmax_1d: Tmax[x] - Tmax[x-1]
+    # --- CÁLCULO DE FEATURES ---
+    # ΔTmax_1d
     df['Delta_Tmax_1d'] = df['Tmax'].diff()
-    
-    # MA_Tmax_3d: Media móvil de 3 días (incluyendo hoy)
+    # MA_Tmax_3d
     df['MA_Tmax_3d'] = df['Tmax'].rolling(window=3).mean()
-    
-    # DTR: Amplitud térmica
+    # DTR
     df['DTR'] = df['Tmax'] - df['Tmin']
-    
     # ΔPresión_24h
     df['Delta_Presion'] = df['SLP'].diff()
     
     # Viento Seno/Coseno
-    # Convertimos grados a radianes primero
     wind_rad = np.deg2rad(df['WindDir'])
     df['Wind_sin'] = np.sin(wind_rad)
     df['Wind_cos'] = np.cos(wind_rad)
 
-    # Features de Fecha (DOY)
+    # Features de Fecha
     df['doy'] = df['time'].dt.dayofyear
     df['day'] = df['time'].dt.day
     df['month'] = df['time'].dt.month
     df['year'] = df['time'].dt.year
-    
-    # DOY ciclico
     df['doy_sin'] = np.sin(2 * np.pi * df['doy'] / 365.25)
     df['doy_cos'] = np.cos(2 * np.pi * df['doy'] / 365.25)
 
-    # 5. Extracción de la fila objetivo
-    # Seleccionamos solo la fila correspondiente a la fecha solicitada (la última)
-    target_row = df[df['time'].dt.date == target_date.date()].iloc[0]
+    # 5. Extracción de datos
+    
+    # A. Fila del día objetivo (x)
+    # Usamos try/except o verificamos si está vacío por seguridad
+    target_rows = df[df['time'].dt.date == target_date.date()]
+    if target_rows.empty:
+        raise ValueError(f"No se encontraron datos para la fecha {date_str}")
+    target_row = target_rows.iloc[0]
 
-    # Construimos el diccionario final mapeando a tus nombres exactos
+    # B. Fila del día siguiente (x+1) -> LABEL
+    next_day_rows = df[df['time'].dt.date == next_day_date.date()]
+    
+    # Lógica para determinar el valor de t_max_x+1
+    if not next_day_rows.empty:
+        # Extraemos el valor, manejando posibles NaN nativos de pandas
+        val = next_day_rows.iloc[0]['Tmax']
+        t_max_next = val if not pd.isna(val) else None
+    else:
+        t_max_next = None
+
+    # Construcción del diccionario final
     features = {
         "Tmax_día_x": target_row['Tmax'],
         "Tmin_día_x": target_row['Tmin'],
@@ -145,9 +146,10 @@ def get_weather_features(city: str, date_str: str):
         "Viento_dir_cos(x)": target_row['Wind_cos'],
         "Nubosidad_media_día_x": target_row['Cloud'],
         "Precipitación_acum_día_x": target_row['Precip'],
-        # t_max_x+1: No podemos calcular el futuro real sin hacer trampa o pedir un día más. 
-        # Lo dejo como None o podrías pedir un día extra en la API si es para entrenamiento histórico.
-        "t_max_x+1 (Label)": None, 
+        
+        # FEATURE ACTUALIZADA:
+        "t_max_x+1 (Label)": t_max_next, 
+        
         "día": target_row['day'],
         "mes": target_row['month'],
         "año": target_row['year'],
@@ -158,5 +160,3 @@ def get_weather_features(city: str, date_str: str):
     }
     
     return features
-
-
