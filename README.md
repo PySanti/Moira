@@ -17,23 +17,31 @@ En esta seccion definire las features que se utilizaran para predecir la tempera
 Empezare con una cantidad reducida de features para ampliar posiblemente en el futuro, mientras mas features, mas complicado construir la funcion.
 
 
-| Nombre de feature                    |         Unidad | Rango de valores (típico)         | Significado                                                                                           |
-| ------------------------------------ | -------------: | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Tmax_día_x**                       |             °C | ~ -50 a 55                        | Máxima observada el día *x*; principal señal de persistencia térmica.                                 |
-| **Tmin_día_x**                       |             °C | ~ -60 a 35                        | Mínima del día *x*; refleja enfriamiento nocturno y masa de aire.                                     |
-| **Tmedia_día_x**                     |             °C | ~ -55 a 45                        | Promedio térmico del día *x* (p.ej. (Tmax+Tmin)/2); estado térmico general.                           |
-| **ΔTmax_1d = Tmax(x) − Tmax(x−1)**   |             °C | ~ -20 a 20                        | Tendencia/cambio reciente; captura entradas de aire, frentes y transiciones.                          |
-| **MA_Tmax_3d (media móvil 3 días)**  |             °C | ~ -50 a 55                        | Inercia térmica de corto plazo; reduce ruido diario.                                                  |
-| **DTR_x = Tmax(x) − Tmin(x)**        |             °C | ~ 0 a 25 (puede >30)              | Amplitud térmica diaria; proxy de nubosidad/humedad/mezcla atmosférica.                               |
-| **HR_media_día_x**                   |              % | 0 a 100                           | Humedad relativa media; modula calentamiento diurno y nubosidad/convección.                           |
-| **Punto_de_rocío_día_x (Td)**        |             °C | ~ -60 a 30 (puede >30 en trópico) | Contenido real de vapor de agua; suele ser más estable y predictivo que HR.                           |
-| **Presión_media_día_x (SLP)**        |            hPa | ~ 870 a 1085                      | Estado sinótico (altas/bajas); asociado a estabilidad, nubosidad y frentes.                           |
-| **ΔPresión_24h = SLP(x) − SLP(x−1)** |            hPa | ~ -20 a 20                        | Cambio sinótico rápido; caída/subida suele anticipar cambios de tiempo y temperatura.                 |
-| **Viento_vel_media_día_x**           |            m/s | 0 a 30 (rachas mayores)           | Mezcla y advección; puede reducir o aumentar Tmax según origen del aire.                              |
-| **Viento_dir_día_x_sin**             |              — | -1 a 1                            | Componente circular de dirección; permite al modelo “entender” la dirección sin saltos 359→0.         |
-| **Viento_dir_día_x_cos**             |              — | -1 a 1                            | Segundo componente circular de dirección; junto con *sin* representa el ángulo completo.              |
-| **Nubosidad_media_día_x**            | % (o fracción) | 0 a 100 (o 0 a 1)                 | Cobertura de nubes; controla radiación entrante y por tanto el calentamiento diurno.                  |
-| **Precipitación_acum_día_x**         |         mm/día | 0 a 300+ (depende del clima)      | Lluvia/tormentas enfrían por evaporación y suelen venir con nubosidad; afecta Tmax del día siguiente. |
+| Nombre de feature                  |         Unidad | Rango de valores (típico) | Significado (incluye cálculo)                                                                              |
+| ---------------------------------- | -------------: | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Tmax_día_x**                     |             °C | ~ -50 a 55                | **Cálculo:** `Tmax[x]`. Máxima del día *x* (persistencia térmica).                                         |
+| **Tmin_día_x**                     |             °C | ~ -60 a 35                | **Cálculo:** `Tmin[x]`. Mínima del día *x* (masa de aire/enfriamiento nocturno).                           |
+| **Tmedia_día_x**                   |             °C | ~ -55 a 45                | **Cálculo:** `(Tmax[x] + Tmin[x]) / 2` (o `Tmed[x]`). Estado térmico general.                              |
+| **ΔTmax_1d**                       |             °C | ~ -20 a 20                | **Cálculo:** `Tmax[x] − Tmax[x−1]`. Tendencia/cambio reciente.                                             |
+| **MA_Tmax_3d**                     |             °C | ~ -50 a 55                | **Cálculo:** `(Tmax[x] + Tmax[x−1] + Tmax[x−2]) / 3`. Inercia térmica de corto plazo.                      |
+| **DTR_x**                          |             °C | ~ 0 a 25 (puede >30)      | **Cálculo:** `Tmax[x] − Tmin[x]`. Amplitud térmica; proxy nubosidad/humedad.                               |
+| **HR_media_día_x**                 |              % | 0 a 100                   | **Cálculo:** `HR_mean[x]`. Humedad relativa media diaria.                                                  |
+| **Punto_de_rocío_día_x (Td)**      |             °C | ~ -60 a 30+               | **Cálculo:** `Td[x]` (preferible si viene en el dataset). Contenido real de vapor de agua.                 |
+| **Presión_media_día_x (SLP)**      |            hPa | ~ 870 a 1085              | **Cálculo:** `SLP_mean[x]`. Señal sinótica (altas/bajas).                                                  |
+| **ΔPresión_24h**                   |            hPa | ~ -20 a 20                | **Cálculo:** `SLP_mean[x] − SLP_mean[x−1]`. Cambio sinótico rápido.                                        |
+| **Viento_vel_media_día_x**         |            m/s | 0 a 30 (rachas mayores)   | **Cálculo:** `wind_speed_mean[x]`. Mezcla/advección.                                                       |
+| **Viento_dir_sin(x)**              |              — | -1 a 1                    | **Cálculo:** `sin(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
+| **Viento_dir_cos(x)**              |              — | -1 a 1                    | **Cálculo:** `cos(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
+| **Nubosidad_media_día_x**          | % (o fracción) | 0–100 (o 0–1)             | **Cálculo:** `cloud_cover_mean[x]`. Control de radiación entrante.                                         |
+| **Precipitación_acum_día_x**       |         mm/día | 0 a 300+                  | **Cálculo:** `precip_sum[x]`. Efecto de lluvia/nubosidad/evaporación.                                      |
+| **t_max_x+1 (si está disponible)** |             °C | ~ -50 a 55                | **Cálculo:** `Tmax[x+1]`. **Label/objetivo** para entrenamiento; **no usar como feature** en inferencia.   |
+| **día (del mes)**                  |           1–31 | 1 a 31                    | **Cálculo:** `day_of_month(fecha)`. Calendario (efecto débil; útil como índice).                           |
+| **mes**                            |           1–12 | 1 a 12                    | **Cálculo:** `month(fecha)`. Estacionalidad mensual (mejor usar DOY cíclico abajo).                        |
+| **año**                            |           YYYY | p.ej. 1950–2100           | **Cálculo:** `year(fecha)`. Tendencia de largo plazo/cambios en medición.                                  |
+| **ciudad**                         |      categoría | N categorías              | **Cálculo:** ID/nombre. Se codifica (one-hot/target encoding/embeddings) para capturar climatología local. |
+| **doy (día del año)**              |      1–365/366 | 1 a 366                   | **Cálculo:** `doy = día_del_año(fecha)`. Índice estacional más fino que “mes”.                             |
+| **doy_sin**                        |              — | -1 a 1                    | **Cálculo:** `sin(2π * doy / 365)`. Estacionalidad en forma cíclica (diciembre cerca de enero).            |
+| **doy_cos**                        |              — | -1 a 1                    | **Cálculo:** `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
 
 ### Creacion de funcion para consulta a api
 
