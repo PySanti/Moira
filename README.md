@@ -3,6 +3,8 @@
 
 El objetivo de este proyecto es crear un bot que se conectara con polymarket para apostar contra la temperatura maxima de una ciudad en un dia especifico.
 
+trello : https://trello.com/b/R37KNQzR/moira
+
 # Desarrollo de V0
 
 ![Version 0 image](./images/v0.png)
