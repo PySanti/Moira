@@ -154,7 +154,6 @@ def get_weather_features(city: str, date_str: str):
         "mes": target_row['month'],
         "año": target_row['year'],
         "ciudad": city,
-        "doy": target_row['doy'],
         "doy_sin": target_row['doy_sin'],
         "doy_cos": target_row['doy_cos']
     }
