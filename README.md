@@ -7,7 +7,7 @@ trello : https://trello.com/b/R37KNQzR/moira
 
 # Desarrollo de V0
 
-![Version 0 image](./images/v0.png)
+![Version 0 image](./images/V0.png)
 
 ## Desarrollo de funcion para consulta a API
 
@@ -235,13 +235,13 @@ La funcion debe ser testeada para:
 
 # Desarrollo de V1
 
-![Version 1 image](./images/v1.png)
+![Version 1 image](./images/V1.png)
 
 # Desarrollo de V2
 
-![Version 2 image](./images/v2.png)
+![Version 2 image](./images/V2.png)
 
 # Desarrollo de V3
 
-![Version 3 image](./images/v3.png)
+![Version 3 image](./images/V3.png)
 
