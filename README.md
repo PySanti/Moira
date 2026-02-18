@@ -9,7 +9,23 @@ trello : https://trello.com/b/R37KNQzR/moira
 
 ![Version 0 image](./images/V0.png)
 
+# Definicion modular de requisitos para V0
+
+* Funcion de consumo de data 
+* Generacion de dataset para entrenamiento
+* Entrenamiento de modelo
+* Fusion de piezas para flujo
+
 ## Desarrollo de funcion para consulta a API
+
+La funcion de consumo de data debe:
+
+1. Usar features valiosas para el ejercicio.
+2. No devolver nunca (o casi nunca) valores null
+3. Tener la posibilidad de ser utilizada en bucle
+4. Devolver Max temps que se correspondan con los valores historicos de polymarket
+5. Ser consistente con las unidades que implementa
+6. Tener una fecha limite inferior o igual a 1980
 
 ### Definicion y refinamiento de features
 
@@ -38,9 +54,6 @@ Empezare con una cantidad reducida de features para ampliar posiblemente en el f
 | **Nubosidad_media_día_x**          | % (o fracción) | 0–100 (o 0–1)             | **Cálculo:** `cloud_cover_mean[x]`. Control de radiación entrante.                                         |
 | **Precipitación_acum_día_x**       |         mm/día | 0 a 300+                  | **Cálculo:** `precip_sum[x]`. Efecto de lluvia/nubosidad/evaporación.                                      |
 | **t_max_x+1 (si está disponible)** |             °C | ~ -50 a 55                | **Cálculo:** `Tmax[x+1]`. **Label/objetivo** para entrenamiento; **no usar como feature** en inferencia.   |
-| **día (del mes)**                  |           1–31 | 1 a 31                    | **Cálculo:** `day_of_month(fecha)`. Calendario (efecto débil; útil como índice).                           |
-| **mes**                            |           1–12 | 1 a 12                    | **Cálculo:** `month(fecha)`. Estacionalidad mensual (mejor usar DOY cíclico abajo).                        |
-| **año**                            |           YYYY | p.ej. 1950–2100           | **Cálculo:** `year(fecha)`. Tendencia de largo plazo/cambios en medición.                                  |
 | **ciudad**                         |      categoría | N categorías              | **Cálculo:** ID/nombre. Se codifica (one-hot/target encoding/embeddings) para capturar climatología local. |
 | **doy_sin**                        |              — | -1 a 1                    | **Cálculo:** `sin(2π * doy / 365)`. Estacionalidad en forma cíclica (diciembre cerca de enero).            |
 | **doy_cos**                        |              — | -1 a 1                    | **Cálculo:** `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
@@ -224,6 +237,8 @@ La funcion debe ser testeada para:
 * Velocidad de respuesta promedio
 * Alcance de fechas
 * Null values
+* Acierto en valores dados
+* Correspondencia con valores historicos de polymarket
 
 ## Creacion de pipeline de preprocesamiento
 

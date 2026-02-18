@@ -4,13 +4,71 @@ import numpy as np
 from datetime import datetime, timedelta
 import math
 
+NCEI_DATA_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
+LGA_GHCND_STATION = "USW00014732"  # LaGuardia Airport (GHCND)
+
+def _get_polymarket_like_tmax_f_klga(date_obj: datetime) -> int | None:
+    """
+    Devuelve Tmax diaria (°F entero) para KLGA/LaGuardia,
+    aproximando el método de Polymarket (Wunderground KLGA, °F a enteros).
+    Fuente programática: NCEI Daily Summaries (GHCND).
+    """
+    day = date_obj.strftime("%Y-%m-%d")
+
+    params = {
+        "dataset": "daily-summaries",
+        "stations": LGA_GHCND_STATION,
+        "startDate": day,
+        "endDate": day,
+        "dataTypes": "TMAX",
+        "format": "json",
+        "units": "standard",  # convierte a unidades US (°F, etc.) si aplica
+        "includeStationName": "false",
+        "includeStationLocation": "false",
+        "includeAttributes": "false",
+    }
+
+    headers = {
+        # NCEI/NWS suelen agradecer User-Agent identificable
+        "User-Agent": "tmax-bot/1.0 (contact: you@example.com)"
+    }
+
+    r = requests.get(NCEI_DATA_URL, params=params, headers=headers, timeout=25)
+    if r.status_code != 200:
+        raise ConnectionError(f"Error NCEI: {r.status_code} - {r.text[:300]}")
+
+    rows = r.json()
+    if not rows:
+        return None
+
+    row = rows[0]
+    # Campo típico: "TMAX"
+    tmax_raw = None
+    for k in row.keys():
+        if k.upper() == "TMAX":
+            tmax_raw = row[k]
+            break
+
+    if tmax_raw in (None, "", "NaN"):
+        return None
+
+    try:
+        tmax_f = float(tmax_raw)
+    except ValueError:
+        return None
+
+    # Algunos datasets usan flags de missing grandes (por si acaso)
+    if tmax_f <= -9000:
+        return None
+
+    # Polymarket usa °F a enteros
+    return tmax_f
+
 def get_weather_features(city: str, date_str: str):
     """
     Obtiene features meteorológicas para una ciudad y fecha específicas.
-    Incluye la temperatura máxima del día siguiente (label) si está disponible.
+    Label t_max_x+1 se ajusta para NYC al criterio Polymarket (KLGA, °F entero).
     """
-    
-    # 1. Configuración de Coordenadas (Lat/Lon)
     city_coords = {
         'new york': {'lat': 40.7128, 'lon': -74.0060},
         'chicago':  {'lat': 41.8781, 'lon': -87.6298},
@@ -18,26 +76,19 @@ def get_weather_features(city: str, date_str: str):
         'seul':     {'lat': 37.5665, 'lon': 126.9780},
         'londres':  {'lat': 51.5074, 'lon': -0.1278}
     }
-    
+
     city_key = city.lower().strip()
     if city_key not in city_coords:
         raise ValueError(f"Ciudad no soportada. Use: {list(city_coords.keys())}")
 
-    # 2. Gestión de Fechas
     target_date = datetime.strptime(date_str, "%d-%m-%y")
-    
-    # Calculamos el día siguiente (x+1) para pedirlo a la API
     next_day_date = target_date + timedelta(days=1)
-    
-    # Pedimos 5 días atrás para el contexto (rolling windows)
     start_date = target_date - timedelta(days=5)
-    
-    # Formato para la API (YYYY-MM-DD)
+
     api_start = start_date.strftime("%Y-%m-%d")
-    # MODIFICACIÓN: Extendemos el final de la petición hasta el día siguiente (x+1)
     api_end = next_day_date.strftime("%Y-%m-%d")
 
-    # 3. Llamada a la API (Open-Meteo Archive)
+    # Open-Meteo (para el resto de features)
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": city_coords[city_key]['lat'],
@@ -56,23 +107,30 @@ def get_weather_features(city: str, date_str: str):
             "cloud_cover_mean",
             "dew_point_2m_mean"
         ],
-        "timezone": "auto"
+        "timezone": "America/New_York"
     }
 
-    response = requests.get(url, params=params)
-    
+    response = requests.get(url, params=params, timeout=25)
     if response.status_code != 200:
-        raise ConnectionError(f"Error conectando con API: {response.text}")
-        
+        raise ConnectionError(f"Error conectando con Open-Meteo: {response.text[:300]}")
+
     data = response.json()
-    
-    # 4. Procesamiento con Pandas
+
     daily_data = data['daily']
+
+
     df = pd.DataFrame(daily_data)
+
+    df_sorted = df.sort_values('time')
+    deltas = df_sorted['time'].diff().dropna().dt.days
+    if not (deltas == 1).all():
+        # aquí hay huecos o saltos (2 días, etc.)
+        print("⚠️ Hay gaps en fechas:", deltas.value_counts())
+        return {}
+    
     df['time'] = pd.to_datetime(df['time'])
     df = df.sort_values('time')
 
-    # Renombrar columnas
     df = df.rename(columns={
         'temperature_2m_max': 'Tmax',
         'temperature_2m_min': 'Tmin',
@@ -86,22 +144,17 @@ def get_weather_features(city: str, date_str: str):
         'precipitation_sum': 'Precip'
     })
 
-    # --- CÁLCULO DE FEATURES ---
-    # ΔTmax_1d
+
+
     df['Delta_Tmax_1d'] = df['Tmax'].diff()
-    # MA_Tmax_3d
     df['MA_Tmax_3d'] = df['Tmax'].rolling(window=3).mean()
-    # DTR
     df['DTR'] = df['Tmax'] - df['Tmin']
-    # ΔPresión_24h
     df['Delta_Presion'] = df['SLP'].diff()
-    
-    # Viento Seno/Coseno
+
     wind_rad = np.deg2rad(df['WindDir'])
     df['Wind_sin'] = np.sin(wind_rad)
     df['Wind_cos'] = np.cos(wind_rad)
 
-    # Features de Fecha
     df['doy'] = df['time'].dt.dayofyear
     df['day'] = df['time'].dt.day
     df['month'] = df['time'].dt.month
@@ -109,27 +162,15 @@ def get_weather_features(city: str, date_str: str):
     df['doy_sin'] = np.sin(2 * np.pi * df['doy'] / 365.25)
     df['doy_cos'] = np.cos(2 * np.pi * df['doy'] / 365.25)
 
-    # 5. Extracción de datos
-    
-    # A. Fila del día objetivo (x)
-    # Usamos try/except o verificamos si está vacío por seguridad
     target_rows = df[df['time'].dt.date == target_date.date()]
     if target_rows.empty:
         raise ValueError(f"No se encontraron datos para la fecha {date_str}")
     target_row = target_rows.iloc[0]
 
-    # B. Fila del día siguiente (x+1) -> LABEL
-    next_day_rows = df[df['time'].dt.date == next_day_date.date()]
-    
-    # Lógica para determinar el valor de t_max_x+1
-    if not next_day_rows.empty:
-        # Extraemos el valor, manejando posibles NaN nativos de pandas
-        val = next_day_rows.iloc[0]['Tmax']
-        t_max_next = val if not pd.isna(val) else None
-    else:
-        t_max_next = None
+    t_max_next_polymarket_f = None
+    if city_key == "new york":
+        t_max_next_polymarket_f = _get_polymarket_like_tmax_f_klga(next_day_date)
 
-    # Construcción del diccionario final
     features = {
         "Tmax_día_x": target_row['Tmax'],
         "Tmin_día_x": target_row['Tmin'],
@@ -146,16 +187,12 @@ def get_weather_features(city: str, date_str: str):
         "Viento_dir_cos(x)": target_row['Wind_cos'],
         "Nubosidad_media_día_x": target_row['Cloud'],
         "Precipitación_acum_día_x": target_row['Precip'],
-        
-        # FEATURE ACTUALIZADA:
-        "t_max_x+1 (Label)": t_max_next, 
-        
-        "día": target_row['day'],
-        "mes": target_row['month'],
-        "año": target_row['year'],
+
+        # NUEVO: label estilo Polymarket (solo NYC) -> °F entero (KLGA)
+        "t_max_x+1": t_max_next_polymarket_f,
         "ciudad": city,
         "doy_sin": target_row['doy_sin'],
         "doy_cos": target_row['doy_cos']
     }
-    
+
     return features
