@@ -21,7 +21,25 @@ trello : https://trello.com/b/R37KNQzR/moira
 Esta funcion consultara las siguientes fuentes:
 
 `NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que polymarket).
+
+NOAA = National Oceanic and Atmospheric Administration (EE. UU.).
+
+Es una agencia del gobierno estadounidense encargada de meteorología (pronósticos, alertas)
+
+NCEI = National Centers for Environmental Information.
+
+Es un centro dentro de NOAA que funciona como archivo oficial y repositorio de datos ambientales (clima, océanos, geofísica)
+
+GHCND = Global Historical Climatology Network – Daily
+
+Es un gran dataset global de observaciones diarias de estaciones meteorológicas (sitios físicos con sensores) que NOAA/NCEI recopila y “normaliza” para que lo puedas consultar de forma consistente.
+
+En resumen, es una interfaz de consumo de data relacionada con clima y meteorología que en este proyecto usaremos para tener las mismas referencias que polymarket.
+
+
 `Open-Meteo`: para el resto de datos.
+
+La mayoría de sus datos vienen de modelos numéricos y reanálisis (datos “en grilla”), por ejemplo ERA5/ERA5-Land e IFS, y te devuelve valores para una celda cercana a las coordenadas que pides (no una medición puntual exacta).
 
 ### Definicion y refinamiento de features
 
