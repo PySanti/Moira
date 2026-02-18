@@ -18,14 +18,10 @@ trello : https://trello.com/b/R37KNQzR/moira
 
 ## Desarrollo de funcion para consulta a API
 
-La funcion de consumo de data debe:
+Esta funcion consultara las siguientes fuentes:
 
-1. Usar features valiosas para el ejercicio.
-2. No devolver nunca (o casi nunca) valores null
-3. Tener la posibilidad de ser utilizada en bucle
-4. Devolver Max temps que se correspondan con los valores historicos de polymarket
-5. Ser consistente con las unidades que implementa
-6. Tener una fecha limite inferior o igual a 1980
+`NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que polymarket).
+`Open-Meteo`: para el resto de datos.
 
 ### Definicion y refinamiento de features
 
@@ -238,7 +234,8 @@ La funcion debe ser testeada para:
 * Alcance de fechas
 * Null values
 * Acierto en valores dados
-* Correspondencia con valores historicos de polymarket
+* Consistencia de unidades
+* Correspondencia con valores historicos de polymarket para todos los tmax y tmin
 
 ## Creacion de pipeline de preprocesamiento
 

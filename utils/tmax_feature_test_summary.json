@@ -1,0 +1,20 @@
+[
+  {
+    "days_total":732,
+    "ok_returns":720,
+    "empty_returns":0,
+    "errors_total":12,
+    "rate_limit_429_hits":0,
+    "first_ok_date":"1980-01-01",
+    "last_ok_date":"1982-01-01",
+    "duration_mean_sec":1.348210654,
+    "duration_median_sec":1.2156148,
+    "duration_p95_sec":1.7372691,
+    "duration_success_mean_sec":1.2871745276,
+    "duration_success_p95_sec":1.6896943,
+    "attempts_mean":1,
+    "backoff_slept_total_sec":0.0,
+    "nulls_per_day_mean":0,
+    "nulls_per_day_p95":0
+  }
+]
