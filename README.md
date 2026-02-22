@@ -381,6 +381,22 @@ La funcion fue testeada por:
 * Consistencia de unidades
 * Correspondencia con valores historicos de polymarket para todos los tmax y tmin
 
+### Generacion de dataset
+
+Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
+
+```
+Dimensiones de dataset 15118 x  21
+```
+
+Posteriormente, se genero el valset utilizando registros de otono a traves del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
+
+```
+Dimensiones de train 11392 x  21
+Dimensiones de train 3726 x  21
+```
+
+
 ## Creacion de pipeline de preprocesamiento
 
 ## Entrenamiento de modelo
