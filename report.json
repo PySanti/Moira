@@ -1,0 +1,45 @@
+{
+  "target": "t_max_x+1",
+  "rows": {
+    "train": 11392,
+    "val": 3726
+  },
+  "cols": {
+    "num": [
+      "Tmax_día_x",
+      "Tmin_día_x",
+      "Tmedia_día_x",
+      "ΔTmax_1d",
+      "MA_Tmax_3d",
+      "DTR_x",
+      "HR_media_día_x",
+      "Punto_de_rocío_día_x (Td)",
+      "Presión_media_día_x (SLP)",
+      "ΔPresión_24h",
+      "Viento_vel_media_día_x",
+      "Viento_dir_sin(x)",
+      "Viento_dir_cos(x)",
+      "Nubosidad_media_día_x",
+      "Precipitación_acum_día_x",
+      "doy_sin",
+      "doy_cos"
+    ],
+    "cat": [
+      "ciudad"
+    ],
+    "dropped": [
+      "date",
+      "date_str"
+    ]
+  },
+  "best_params": {
+    "model__min_samples_leaf": 10,
+    "model__max_leaf_nodes": 127,
+    "model__max_iter": 300,
+    "model__max_depth": null,
+    "model__max_bins": 255,
+    "model__learning_rate": 0.03,
+    "model__l2_regularization": 0.1
+  },
+  "best_cv_mae": 2.3821435019630037
+}
