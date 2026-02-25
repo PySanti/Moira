@@ -383,6 +383,8 @@ La funcion fue testeada por:
 
 ### Generacion de dataset
 
+#### Version de dataset 1.0
+
 Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
 
 ```
@@ -396,10 +398,44 @@ Dimensiones de train 11392 x  21
 Dimensiones de train 3726 x  21
 ```
 
+La lista de features es:
+
+```
+
+date
+date_str
+Tmax_día_x
+Tmin_día_x
+Tmedia_día_x
+ΔTmax_1d
+MA_Tmax_3d
+DTR_x
+HR_media_día_x
+Punto_de_rocío_día_x (Td)
+Presión_media_día_x (SLP)
+ΔPresión_24h
+Viento_vel_media_día_x
+Viento_dir_sin(x)
+Viento_dir_cos(x)
+Nubosidad_media_día_x
+Precipitación_acum_día_x
+t_max_x+1
+ciudad
+doy_sin
+doy_cos
+```
+
+
+
 
 ## Entrenamiento de modelo
 
 ### Entrenamiento 1.0
+
+Algoritmo : HistGradientBoostingRegressor
+Version de dataset: 1.0
+Valset : otono
+
 
 Se selecciono el algoritmo `HistGradientBoostingRegressor` y en conjunto con el dataset anteriormente mencionado y un proceso de seleccion de hiperparametros, se obtuvieron los siguientes resultados:
 
