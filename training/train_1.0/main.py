@@ -10,7 +10,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import RandomizedSearchCV, PredefinedSplit
+from sklearn.model_selection import RandomizedSearchCV, PredefinedSplit, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -53,31 +53,33 @@ def split_xy(df: pd.DataFrame, target_col: str, drop_cols: List[str]) -> Tuple[p
 # -------------------- Main --------------------
 
 def main():
-    train_path = Path("./dataset/trainset.csv")
-    val_path = Path("./dataset/valset.csv")
+    dataset = Path("../../dataset/original_dataset.csv")
 
-    df_train = pd.read_csv(train_path)
-    df_val = pd.read_csv(val_path)
+    # ✅ Leer dataset original
+    df = pd.read_csv(dataset)
 
     # Target
     target = "t_max_x+1"
 
-    if target not in df_val.columns:
-        raise SystemExit(f"[ERROR] El target '{target}' no existe en valset.csv.")
+    if target not in df.columns:
+        raise SystemExit(f"[ERROR] El target '{target}' no existe en el dataset original.")
+
+    # ✅ Split RANDOM: train / val / test (70/15/15)
+    # Primero sacamos test (15%), luego val (15% del total ≈ 0.17647 del restante)
+    df_trainval, df_test = train_test_split(df, test_size=0.15, random_state=42, shuffle=True)
+    df_train, df_val = train_test_split(df_trainval, test_size=0.20, random_state=42, shuffle=True)
 
     # Excluir columnas de fecha si existen (porque ya tienes doy_sin/cos)
-    drop_cols = ["date","date_str"]
+    drop_cols = ["date", "date_str"]
     X_train, y_train = split_xy(df_train, target, drop_cols)
     X_val, y_val = split_xy(df_val, target, drop_cols)
+    X_test, y_test = split_xy(df_test, target, drop_cols)
 
     # Columnas categóricas vs numéricas (simple y robusto)
     cat_cols = [c for c in X_train.columns if X_train[c].dtype in ["object", "str"] or str(X_train[c].dtype).startswith("category")]
-
     num_cols = [c for c in X_train.columns if c not in cat_cols]
 
     # Preprocesamiento básico: imputación + normalización
-    # Nota: para modelos tipo boosting no es estrictamente necesario escalar,
-    # pero lo incluyo porque lo pediste y no hace daño.
     numeric_pipe = Pipeline(steps=[
         ("scaler", StandardScaler()),
     ])
@@ -105,14 +107,13 @@ def main():
         ("model", model),
     ])
 
-    # Usar tu split train/val tal cual (sin CV aleatorio)
-    # -> combinamos datasets y marcamos val como fold=0, train como fold=-1
+    # ✅ Hypertuning SOLO con train/val (PredefinedSplit)
     X_all = pd.concat([X_train, X_val], axis=0, ignore_index=True)
     y_all = pd.concat([y_train, y_val], axis=0, ignore_index=True)
     test_fold = np.array([-1] * len(X_train) + [0] * len(X_val))  # -1=entrena, 0=val
     ps = PredefinedSplit(test_fold=test_fold)
 
-    # Espacio de búsqueda (práctico para tabular time-series con features engineered)
+    # Espacio de búsqueda
     param_dist = {
         "model__max_iter": [300, 600, 1000, 1500],
         "model__learning_rate": [0.02, 0.03, 0.05, 0.08, 0.1],
@@ -129,14 +130,14 @@ def main():
         n_iter=15_000,
         scoring="neg_mean_absolute_error",  # minimiza MAE
         cv=ps,
-        refit=False, # que hace esto?
+        refit=False,
         random_state=42,
         n_jobs=15,
         verbose=2,
     )
 
     print("\n=== Entrenando + Hypertuning (MAE) ===")
-    print(f"Train rows: {len(X_train):,} | Val rows: {len(X_val):,}")
+    print(f"Train rows: {len(X_train):,} | Val rows: {len(X_val):,} | Test rows: {len(X_test):,}")
     print(f"Target: {target}")
     if drop_cols:
         print(f"Drop cols (fecha detectada): {drop_cols}")
@@ -156,11 +157,10 @@ def main():
     for k, v in best_params.items():
         print(f"  {k}: {v}")
 
-
     # Guardar reporte
     report = {
         "target": target,
-        "rows": {"train": int(len(X_train)), "val": int(len(X_val))},
+        "rows": {"train": int(len(X_train)), "val": int(len(X_val)), "test": int(len(X_test))},
         "cols": {"num": num_cols, "cat": cat_cols, "dropped": drop_cols},
         "best_params": best_params,
         "best_cv_mae": best_cv_mae
@@ -172,4 +172,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
