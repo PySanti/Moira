@@ -3,47 +3,29 @@
 
 El objetivo de este proyecto es crear un bot que se conectara con polymarket para apostar contra la temperatura maxima de una ciudad en un dia especifico.
 
-trello : https://trello.com/b/R37KNQzR/moira
+**Trello** : https://trello.com/b/R37KNQzR/moira
+**Objetivo de mae en Celcius** : 0.26 max
 
 # Desarrollo de V0
 
 ![Version 0 image](./images/v0.png)
 
-## Definicion modular de requisitos para V0
+# Definicion modular de requisitos para V0
 
-* Funcion de consumo de data 
-* Generacion de dataset para entrenamiento
-* Entrenamiento de modelo
-* Fusion de piezas para flujo
+* **Funcion de consumo de data**: una funcion que reciba una ciudad y un dia X y retorne un diccionario de valores de las features para el dia X y la max temp del dia X+1 si esta disponible
 
-# Sprint 1
-
-## Desarrollo de funcion para consulta a API
-
-Esta funcion consultara las siguientes fuentes:
-
-`NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que polymarket).
-
-NOAA = National Oceanic and Atmospheric Administration (EE. UU.).
-
-Es una agencia del gobierno estadounidense encargada de meteorología (pronósticos, alertas)
-
-NCEI = National Centers for Environmental Information.
-
-Es un centro dentro de NOAA que funciona como archivo oficial y repositorio de datos ambientales (clima, océanos, geofísica)
-
-GHCND = Global Historical Climatology Network – Daily
-
-Es un gran dataset global de observaciones diarias de estaciones meteorológicas (sitios físicos con sensores) que NOAA/NCEI recopila y “normaliza” para que lo puedas consultar de forma consistente.
-
-En resumen, es una interfaz de consumo de data relacionada con clima y meteorología que en este proyecto usaremos para tener las mismas referencias que polymarket.
+* **Generacion de dataset para entrenamiento**: usando la funcion anteriormente generada, se crea el dataset.
 
 
-`Open-Meteo`: para el resto de datos.
+* **Entrenamiento de modelo**
 
-La mayoría de sus datos vienen de modelos numéricos y reanálisis (datos “en grilla”), por ejemplo ERA5/ERA5-Land e IFS, y te devuelve valores para una celda cercana a las coordenadas que pides (no una medición puntual exacta).
 
-### Definicion y refinamiento de features
+* **Fusion de piezas para flujo**
+
+# Sprint 1 - V0
+
+
+## Definicion y refinamiento de features
 
 Nota: es importante tener en cuenta las horas de ejecucion del bot, esto por que el bot se entrenara con data conseguida al final de los dias, entonces el bot mientras mas hacia el final del dia se ejecute, mas preciso sera por que mas se ajustara a su contexto de entrenamiento.
 
@@ -75,6 +57,32 @@ Empezare con una cantidad reducida de features para ampliar posiblemente en el f
 | **doy_cos**                        |              — | `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
 
 **Nota**: `dia`, `mes` y `año` , son redundantes teniendo `doy_sin` y `doy_cos`, dejarlo unicamente para identificar registros, descartarlos para entrenamiento e inferencia.
+
+
+## Desarrollo de funcion para consulta a API
+
+Esta funcion consultara las siguientes fuentes:
+
+`NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que polymarket).
+
+NOAA = National Oceanic and Atmospheric Administration (EE. UU.).
+
+Es una agencia del gobierno estadounidense encargada de meteorología (pronósticos, alertas)
+
+NCEI = National Centers for Environmental Information.
+
+Es un centro dentro de NOAA que funciona como archivo oficial y repositorio de datos ambientales (clima, océanos, geofísica)
+
+GHCND = Global Historical Climatology Network – Daily
+
+Es un gran dataset global de observaciones diarias de estaciones meteorológicas (sitios físicos con sensores) que NOAA/NCEI recopila y “normaliza” para que lo puedas consultar de forma consistente.
+
+En resumen, es una interfaz de consumo de data relacionada con clima y meteorología que en este proyecto usaremos para tener las mismas referencias que polymarket.
+
+
+`Open-Meteo`: para el resto de datos.
+
+La mayoría de sus datos vienen de modelos numéricos y reanálisis (datos “en grilla”), por ejemplo ERA5/ERA5-Land e IFS, y te devuelve valores para una celda cercana a las coordenadas que pides (no una medición puntual exacta).
 
 ### Creacion de funcion para consulta a api
 
@@ -383,9 +391,7 @@ La funcion fue testeada para:
 * Consistencia de unidades
 * Correspondencia con valores historicos de polymarket para todos los tmax y tmin
 
-### Generacion de dataset
-
-#### Version de dataset 1.0
+## Generacion de dataset 1.0
 
 Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
 
@@ -435,7 +441,7 @@ doy_cos
 
 Algoritmo : HistGradientBoostingRegressor
 Version de dataset: 1.0
-Valset : otono
+Valset : otoño
 
 
 Se selecciono el algoritmo `HistGradientBoostingRegressor` y en conjunto con el dataset anteriormente mencionado y un proceso de seleccion de hiperparametros, se obtuvieron los siguientes resultados:
@@ -672,7 +678,7 @@ if __name__ == "__main__":
 }
 ```
 
-## Entrenamiento 1.1
+### Entrenamiento 1.1
 
 
 Algoritmo : HistGradientBoostingRegressor
@@ -910,7 +916,7 @@ if __name__ == "__main__":
 }
 ```
 
-## Entrenamiento 1.2
+### Entrenamiento 1.2
 
 Algoritmo : XGBoostRegressor
 Version de dataset: 1.0
@@ -1160,6 +1166,27 @@ if __name__ == "__main__":
   "best_cv_mae": 2.381992741876177
 }
 ```
+
+
+
+# Sprint 2 - V0
+
+Para este 2do sprint del V0 se buscara mejorar los resultados a traves de:
+
+1. Revision de features actuales a traves de estudio de correlaciones.
+2. Depuracion de features inutiles.
+3. Ampliacion de features, objetivo : 40.
+4. Posibilidad de cambiar fuente de datos (Open-Meteo)
+
+Luego:
+
+* Redefinir funcion para obtencion de data
+* Testear nueva version
+* Generar dataset 1.1
+* Split
+* Entrenamiento
+* Evaluacion
+
 # Desarrollo de V1
 
 ![Version 1 image](./images/v1.png)
