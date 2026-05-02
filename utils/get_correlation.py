@@ -5,15 +5,15 @@
 get_correlation.py
 
 Uso:
-  python analyze_feature_correlations.py \
+  python get_correlation.py \
     --dataset ./dataset/original_dataset.csv \
     --out ./reports/correlations \
     --target "t_max_x+1"
 
 Salida:
   - correlation_summary.csv
-  - correlation_summary.md
   - plots/*.png
+  - plots/spearman_feature_target_matrix.png
 """
 
 from __future__ import annotations
@@ -55,14 +55,13 @@ def is_datetime_like(series: pd.Series, min_success_ratio: float = 0.80) -> bool
         return False
 
     parsed = pd.to_datetime(non_null, errors="coerce")
-    success_ratio = parsed.notna().mean()
-    return success_ratio >= min_success_ratio
+    return parsed.notna().mean() >= min_success_ratio
 
 
 def correlation_ratio(categories: pd.Series, values: pd.Series) -> float:
     """
     Correlation ratio / Eta.
-    Sirve para medir asociación entre una variable categórica y un target numérico.
+    Mide asociación entre una variable categórica y un target numérico.
     Rango: 0 a 1.
     """
     df = pd.DataFrame({"cat": categories, "y": values}).dropna()
@@ -108,10 +107,16 @@ def downsample_df(df: pd.DataFrame, max_points: int, seed: int = 42) -> pd.DataF
 
 
 # -----------------------------
-# Plotters
+# Plots feature vs target
 # -----------------------------
 
-def plot_numeric_feature(df: pd.DataFrame, feature: str, target: str, output_path: Path, max_points: int):
+def plot_numeric_feature(
+    df: pd.DataFrame,
+    feature: str,
+    target: str,
+    output_path: Path,
+    max_points: int,
+):
     data = df[[feature, target]].dropna()
     if data.empty:
         return
@@ -139,7 +144,13 @@ def plot_numeric_feature(df: pd.DataFrame, feature: str, target: str, output_pat
     plt.close()
 
 
-def plot_categorical_feature(df: pd.DataFrame, feature: str, target: str, output_path: Path, max_categories: int = 25):
+def plot_categorical_feature(
+    df: pd.DataFrame,
+    feature: str,
+    target: str,
+    output_path: Path,
+    max_categories: int,
+):
     data = df[[feature, target]].dropna()
     if data.empty:
         return
@@ -167,7 +178,13 @@ def plot_categorical_feature(df: pd.DataFrame, feature: str, target: str, output
     plt.close()
 
 
-def plot_datetime_feature(df: pd.DataFrame, feature: str, target: str, output_path: Path, max_points: int):
+def plot_datetime_feature(
+    df: pd.DataFrame,
+    feature: str,
+    target: str,
+    output_path: Path,
+    max_points: int,
+):
     data = df[[feature, target]].dropna().copy()
     if data.empty:
         return
@@ -193,7 +210,97 @@ def plot_datetime_feature(df: pd.DataFrame, feature: str, target: str, output_pa
 
 
 # -----------------------------
-# Analysis
+# Spearman matrix
+# -----------------------------
+
+def get_numeric_columns_for_spearman(df: pd.DataFrame, target: str) -> list[str]:
+    """
+    Para una matriz Spearman común se incluyen columnas numéricas.
+    Excluye columnas tipo fecha o texto no numérico.
+    Incluye el target.
+    """
+    numeric_cols = []
+
+    for col in df.columns:
+        if is_datetime_like(df[col]):
+            continue
+
+        converted = pd.to_numeric(df[col], errors="coerce")
+        non_null_ratio = converted.notna().mean()
+        unique_count = converted.nunique(dropna=True)
+
+        if non_null_ratio >= 0.80 and unique_count > 1:
+            df[col] = converted
+            numeric_cols.append(col)
+
+    if target not in numeric_cols:
+        raise ValueError(
+            f"El target '{target}' no quedó incluido en la matriz Spearman. "
+            "Verifica que sea numérico."
+        )
+
+    ordered_cols = [col for col in numeric_cols if col != target] + [target]
+    return ordered_cols
+
+
+def plot_spearman_matrix(
+    df: pd.DataFrame,
+    target: str,
+    output_path: Path,
+    annotate_limit: int = 25,
+):
+    cols = get_numeric_columns_for_spearman(df, target)
+
+    if len(cols) < 2:
+        print("[WARN] No hay suficientes columnas numéricas para generar matriz Spearman.")
+        return
+
+    corr_matrix = df[cols].corr(method="spearman")
+
+    n_features = len(corr_matrix.columns)
+    fig_size = max(10, n_features * 0.65)
+
+    plt.figure(figsize=(fig_size, fig_size))
+
+    im = plt.imshow(corr_matrix.values, vmin=-1, vmax=1, aspect="auto")
+    plt.colorbar(im, fraction=0.046, pad=0.04)
+
+    plt.title("Spearman Correlation Matrix - Features + Target")
+
+    plt.xticks(
+        ticks=np.arange(n_features),
+        labels=corr_matrix.columns,
+        rotation=90,
+    )
+
+    plt.yticks(
+        ticks=np.arange(n_features),
+        labels=corr_matrix.index,
+    )
+
+    if n_features <= annotate_limit:
+        for i in range(n_features):
+            for j in range(n_features):
+                value = corr_matrix.iloc[i, j]
+                if pd.notna(value):
+                    plt.text(
+                        j,
+                        i,
+                        f"{value:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=8,
+                    )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+
+    print(f"Matriz Spearman guardada en: {output_path.resolve()}")
+
+
+# -----------------------------
+# Feature-target analysis
 # -----------------------------
 
 def analyze_feature(df: pd.DataFrame, feature: str, target: str) -> dict:
@@ -254,9 +361,13 @@ def analyze_feature(df: pd.DataFrame, feature: str, target: str) -> dict:
     return result
 
 
+# -----------------------------
+# Main
+# -----------------------------
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Analiza correlación/asociación entre cada feature y un target numérico."
+        description="Genera correlaciones feature-target y matriz Spearman features+target."
     )
 
     parser.add_argument(
@@ -281,7 +392,7 @@ def main():
         "--max-points",
         type=int,
         default=8000,
-        help="Máximo de puntos por gráfico numérico para evitar imágenes muy pesadas. Default: 8000."
+        help="Máximo de puntos por gráfico numérico. Default: 8000."
     )
 
     parser.add_argument(
@@ -311,15 +422,12 @@ def main():
             f"Columnas disponibles: {list(df.columns)}"
         )
 
-    if not pd.api.types.is_numeric_dtype(df[args.target]):
-        df[args.target] = pd.to_numeric(df[args.target], errors="coerce")
+    df[args.target] = pd.to_numeric(df[args.target], errors="coerce")
 
     if df[args.target].isna().all():
         raise ValueError(f"El target '{args.target}' no pudo convertirse a numérico.")
 
     features = [col for col in df.columns if col != args.target]
-
-    results = []
 
     print(f"\nDataset: {dataset_path}")
     print(f"Filas: {len(df):,}")
@@ -328,6 +436,9 @@ def main():
     print(f"Features a analizar: {len(features):,}")
     print(f"Salida: {output_dir.resolve()}\n")
 
+    results = []
+
+    # 1 y 2) CSV feature-target + gráficos individuales
     for i, feature in enumerate(features, start=1):
         print(f"[{i}/{len(features)}] Analizando: {feature}")
 
@@ -377,39 +488,25 @@ def main():
     summary = summary.sort_values(
         by="association_score",
         ascending=False,
-        na_position="last"
+        na_position="last",
     )
 
     csv_path = output_dir / "correlation_summary.csv"
-    md_path = output_dir / "correlation_summary.md"
-
     summary.to_csv(csv_path, index=False)
 
-    md_cols = [
-        "feature",
-        "type",
-        "association_score",
-        "pearson",
-        "spearman",
-        "eta",
-        "missing_pct_feature",
-        "unique_values",
-        "non_null_pair",
-        "plot_path",
-    ]
+    # 3) Gráfico Spearman entre features numéricas + target
+    spearman_plot_path = plots_dir / "spearman_feature_target_matrix.png"
 
-    md = "# Feature Correlation / Association Report\n\n"
-    md += f"Dataset: `{dataset_path}`\n\n"
-    md += f"Target: `{args.target}`\n\n"
-    md += "Ordenado por `association_score` descendente.\n\n"
-    md += summary[md_cols].to_markdown(index=False)
-
-    md_path.write_text(md, encoding="utf-8")
+    plot_spearman_matrix(
+        df=df.copy(),
+        target=args.target,
+        output_path=spearman_plot_path,
+    )
 
     print("\n=== Listo ===")
-    print(f"Resumen CSV: {csv_path.resolve()}")
-    print(f"Resumen MD:  {md_path.resolve()}")
-    print(f"Gráficos:    {plots_dir.resolve()}")
+    print(f"CSV correlaciones feature-target: {csv_path.resolve()}")
+    print(f"Gráficos feature-target:          {plots_dir.resolve()}")
+    print(f"Matriz Spearman:                  {spearman_plot_path.resolve()}")
 
 
 if __name__ == "__main__":
