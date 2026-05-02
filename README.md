@@ -1,42 +1,42 @@
 # Moira
 
 
-El objetivo de este proyecto es crear un bot que se conectara con polymarket para apostar contra la temperatura maxima de una ciudad en un dia especifico.
+El objetivo de este proyecto es crear un bot que se conectará con Polymarket para apostar contra la temperatura máxima de una ciudad en un día específico.
 
-**Trello** : https://trello.com/b/R37KNQzR/moira
-**Objetivo de mae en Celcius** : 0.26 max
+**Trello**: https://trello.com/b/R37KNQzR/moira
+**Objetivo de MAE en Celsius**: 0.26 máx.
 
 # Desarrollo de V0
 
-![Version 0 image](./images/v0.png)
+![Versión 0 image](./images/v0.png)
 
-# Definicion modular de requisitos para V0
+# Definición modular de requisitos para V0
 
-* **Funcion de consumo de data**: una funcion que reciba una ciudad y un dia X y retorne un diccionario de valores de las features para el dia X y la max temp del dia X+1 si esta disponible
+* **Función de consumo de data**: una función que reciba una ciudad y un día X, y retorne un diccionario de valores de las features para el día X y la temperatura máxima del día X+1, si está disponible.
 
-* **Generacion de dataset para entrenamiento**: usando la funcion anteriormente generada, se crea el dataset.
+* **Generación de dataset para entrenamiento**: usando la función anteriormente generada, se crea el dataset.
 
 
 * **Entrenamiento de modelo**
 
 
-* **Fusion de piezas para flujo**
+* **Fusión de piezas para flujo**
 
 # Sprint 1 - V0
 
 
-## Definicion y refinamiento de features
+## Definición y refinamiento de features
 
-Nota: es importante tener en cuenta las horas de ejecucion del bot, esto por que el bot se entrenara con data conseguida al final de los dias, entonces el bot mientras mas hacia el final del dia se ejecute, mas preciso sera por que mas se ajustara a su contexto de entrenamiento.
+Nota: es importante tener en cuenta las horas de ejecución del bot, esto porque el bot se entrenará con data conseguida al final de los días; entonces, mientras más hacia el final del día se ejecute, más preciso será porque más se ajustará a su contexto de entrenamiento.
 
-En esta seccion definire las features que se utilizaran para predecir la temperatura de un dia X + 1 a partir de data del dia X.
+En esta sección definiré las features que se utilizarán para predecir la temperatura de un día X + 1 a partir de data del día X.
 
-Empezare con una cantidad reducida de features para ampliar posiblemente en el futuro, mientras mas features, mas complicado construir la funcion.
+Empezaré con una cantidad reducida de features para ampliar posiblemente en el futuro; mientras más features, más complicado será construir la función.
 
 
 | Nombre de feature                  |         Unidad | Significado (incluye cálculo)                                                                              |
 | ---------------------------------- | -------------: | ---------------------------------------------------------------------------------------------------------- |
-| **Tmax_día_x**                     |             °C |`Tmax[x]`. Máxima del día *x* (persistencia térmica).                                         |
+| **Tmax_día_x**                     |             °C | `Tmax[x]`. Máxima del día *x* (persistencia térmica).                                        |
 | **Tmin_día_x**                     |             °C | `Tmin[x]`. Mínima del día *x* (masa de aire/enfriamiento nocturno).                           |
 | **Tmedia_día_x**                   |             °C | `(Tmax[x] + Tmin[x]) / 2` (o `Tmed[x]`). Estado térmico general.                              |
 | **ΔTmax_1d**                       |             °C | `Tmax[x] − Tmax[x−1]`. Tendencia/cambio reciente.                                             |
@@ -56,37 +56,37 @@ Empezare con una cantidad reducida de features para ampliar posiblemente en el f
 | **doy_sin**                        |              — | `sin(2π * doy / 365)`. Estacionalidad en forma cíclica (diciembre cerca de enero).            |
 | **doy_cos**                        |              — | `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
 
-**Nota**: `dia`, `mes` y `año` , son redundantes teniendo `doy_sin` y `doy_cos`, dejarlo unicamente para identificar registros, descartarlos para entrenamiento e inferencia.
+**Nota**: `dia`, `mes` y `año` son redundantes teniendo `doy_sin` y `doy_cos`; dejarlos únicamente para identificar registros y descartarlos para entrenamiento e inferencia.
 
 
-## Desarrollo de funcion para consulta a API
+## Desarrollo de función para consulta a API
 
-Esta funcion consultara las siguientes fuentes:
+Esta función consultará las siguientes fuentes:
 
-`NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que polymarket).
+`NCEI/GHCND - LaGuardia Airport (USW00014732)`: para Tmax y Tmin (mismo que Polymarket).
 
 NOAA = National Oceanic and Atmospheric Administration (EE. UU.).
 
-Es una agencia del gobierno estadounidense encargada de meteorología (pronósticos, alertas)
+Es una agencia del gobierno estadounidense encargada de meteorología (pronósticos, alertas).
 
 NCEI = National Centers for Environmental Information.
 
-Es un centro dentro de NOAA que funciona como archivo oficial y repositorio de datos ambientales (clima, océanos, geofísica)
+Es un centro dentro de NOAA que funciona como archivo oficial y repositorio de datos ambientales (clima, océanos, geofísica).
 
-GHCND = Global Historical Climatology Network – Daily
+GHCND = Global Historical Climatology Network – Daily.
 
 Es un gran dataset global de observaciones diarias de estaciones meteorológicas (sitios físicos con sensores) que NOAA/NCEI recopila y “normaliza” para que lo puedas consultar de forma consistente.
 
-En resumen, es una interfaz de consumo de data relacionada con clima y meteorología que en este proyecto usaremos para tener las mismas referencias que polymarket.
+En resumen, es una interfaz de consumo de data relacionada con clima y meteorología que en este proyecto usaremos para tener las mismas referencias que Polymarket.
 
 
 `Open-Meteo`: para el resto de datos.
 
 La mayoría de sus datos vienen de modelos numéricos y reanálisis (datos “en grilla”), por ejemplo ERA5/ERA5-Land e IFS, y te devuelve valores para una celda cercana a las coordenadas que pides (no una medición puntual exacta).
 
-### Creacion de funcion para consulta a api
+### Creación de función para consulta a API
 
-Version inicial :
+Versión inicial:
 
 ```python
 import requests
@@ -379,19 +379,19 @@ def get_weather_features(city: str, date_str: str, strict: bool = True) -> dict:
     return features
 ```
 
-### Testeo de funcion
+### Testeo de función
 
-La funcion fue testeada para:
+La función fue testeada para:
 
-* Posibles bloqueos por rate limiting 
-* Velocidad de respuesta promedio
-* Alcance de fechas
-* Null values
-* Acierto en valores dados
-* Consistencia de unidades
-* Correspondencia con valores historicos de polymarket para todos los tmax y tmin
+* Posibles bloqueos por rate limiting.
+* Velocidad de respuesta promedio.
+* Alcance de fechas.
+* Null values.
+* Acierto en valores dados.
+* Consistencia de unidades.
+* Correspondencia con valores históricos de Polymarket para todos los Tmax y Tmin.
 
-## Generacion de dataset 1.0
+## Generación de dataset 1.0
 
 Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
 
@@ -399,7 +399,7 @@ Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obt
 Dimensiones de dataset 15118 x  21
 ```
 
-Posteriormente, se genero el valset utilizando registros de otoño a traves del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
+Posteriormente, se generó el valset utilizando registros de otoño a través del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
 
 ```
 Dimensiones de train 11392 x  21
@@ -439,14 +439,14 @@ doy_cos
 
 ### Entrenamiento 1.0
 
-Algoritmo : HistGradientBoostingRegressor
-Version de dataset: 1.0
-Valset : otoño
+Algoritmo: HistGradientBoostingRegressor
+Versión de dataset: 1.0
+Valset: otoño
 
 
-Se selecciono el algoritmo `HistGradientBoostingRegressor` y en conjunto con el dataset anteriormente mencionado y un proceso de seleccion de hiperparametros, se obtuvieron los siguientes resultados:
+Se seleccionó el algoritmo `HistGradientBoostingRegressor` y, en conjunto con el dataset anteriormente mencionado y un proceso de selección de hiperparámetros, se obtuvieron los siguientes resultados:
 
-**Configuarcion**:
+**Configuración**:
 
 ```python
 
@@ -681,11 +681,11 @@ if __name__ == "__main__":
 ### Entrenamiento 1.1
 
 
-Algoritmo : HistGradientBoostingRegressor
-Version de dataset: 1.0
-Valset : random split
+Algoritmo: HistGradientBoostingRegressor
+Versión de dataset: 1.0
+Valset: random split
 
-**Configuracion**
+**Configuración**
 
 ```python
 import argparse
@@ -918,11 +918,11 @@ if __name__ == "__main__":
 
 ### Entrenamiento 1.2
 
-Algoritmo : XGBoostRegressor
-Version de dataset: 1.0
-Valset : random split
+Algoritmo: XGBoostRegressor
+Versión de dataset: 1.0
+Valset: random split
 
-**Configuracion**:
+**Configuración**:
 
 ```python
 
@@ -1171,31 +1171,31 @@ if __name__ == "__main__":
 
 # Sprint 2 - V0
 
-Para este 2do sprint del V0 se buscara mejorar los resultados a traves de:
+Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 
-1. Revision de features actuales a traves de estudio de correlaciones.
-2. Depuracion de features inutiles.
-3. Ampliacion de features, objetivo : 40.
-4. Posibilidad de cambiar fuente de datos (Open-Meteo)
+1. Revisión de features actuales a través de estudio de correlaciones.
+2. Depuración de features inútiles.
+3. Ampliación de features, objetivo: 40.
+4. Posibilidad de cambiar fuente de datos (Open-Meteo).
 
 Luego:
 
-* Redefinir funcion para obtencion de data
-* Testear nueva version
-* Generar dataset 1.1
-* Split
-* Entrenamiento
-* Evaluacion
+* Redefinir función para obtención de data.
+* Testear nueva versión.
+* Generar dataset 1.1.
+* Split.
+* Entrenamiento.
+* Evaluación.
 
 # Desarrollo de V1
 
-![Version 1 image](./images/v1.png)
+![Versión 1 image](./images/v1.png)
 
 # Desarrollo de V2
 
-![Version 2 image](./images/v2.png)
+![Versión 2 image](./images/v2.png)
 
 # Desarrollo de V3
 
-![Version 3 image](./images/v3.png)
+![Versión 3 image](./images/v3.png)
 
