@@ -4,6 +4,7 @@
 El objetivo de este proyecto es crear un bot que se conectará con Polymarket para apostar contra la temperatura máxima de una ciudad en un día específico.
 
 **Trello**: https://trello.com/b/R37KNQzR/moira
+
 **Objetivo de MAE en Celsius**: 0.26 máx.
 
 # Desarrollo de V0
@@ -1206,21 +1207,18 @@ if __name__ == "__main__":
 
 Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 
-1. Revisión de features actuales a través de estudio de correlaciones.
-2. Depuración de features inútiles.
-3. Ampliación de features valiosas
-4. Posibilidad de cambiar fuente de datos (Open-Meteo).
-
-Luego:
-
-5. Redefinir función para obtención de data.
-6. Testear nueva versión.
-7. Generar dataset 1.1.
-8. Split:
+1. Ampliación de features
+2. Redefinir modulo para obtención de data (Posibilidad de cambiar fuente de datos (Open-Meteo))
+3. Testear nueva versión.
+4. Generar dataset 1.1 (para todas las features acumuladas).
+5. Revisión de features a través de estudio de correlaciones.
+6. Split:
     - Train-val : 1980 - 2020
     - Test : 2021 - 2026
-9. Entrenamiento: para validacion se hara un **backtesting - walk-forward**.
-10. Evaluación usando set de test.
+7. Entrenamiento:
+    - Se hara una version de entrenamiento para diferentes versiones del dataset analizando las correlaciones
+    - Para validacion se hara un **backtesting - walk-forward**
+8. Evaluación usando set de test.
 
 
 ![backtesting](./images/backtesting.png)
@@ -1230,112 +1228,6 @@ Luego:
 
 </details>
 
-<details>
-<summary><strong>Analisis de correlaciones feature - target</strong></summary>
-
-
-| Ranking | Feature                     | Score |
-| ------: | --------------------------- | ----: |
-|       1 | `Tmedia_día_x`              | 0.926 |
-|       2 | `Tmin_día_x`                | 0.918 |
-|       3 | `Tmax_día_x`                | 0.917 |
-|       4 | `MA_Tmax_3d`                | 0.902 |
-|       5 | `Punto_de_rocío_día_x (Td)` | 0.870 |
-|       6 | `doy_cos`                   | 0.838 |
-|       7 | `DTR_x`                     | 0.316 |
-|       8 | `doy_sin`                   | 0.312 |
-|       9 | `Viento_vel_media_día_x`    | 0.300 |
-|      10 | `Viento_dir_cos(x)`         | 0.285 |
-|      11 | `ΔTmax_1d`                  | 0.134 |
-|      12 | `Viento_dir_sin(x)`         | 0.133 |
-|      13 | `HR_media_día_x`            | 0.119 |
-|      14 | `Nubosidad_media_día_x`     | 0.071 |
-|      15 | `Presión_media_día_x (SLP)` | 0.071 |
-|      16 | `ΔPresión_24h`              | 0.059 |
-|      17 | `Precipitación_acum_día_x`  | 0.005 |
-
-
-### Matriz de correlación Spearman
-
-![Matriz Spearman features + target](./report_correlation/plots/spearman_feature_target_matrix.png)
-
----
-
-### Plots feature vs target
-
-<details>
-<summary>Ver gráficos de correlación feature-target</summary>
-
-### `Tmedia_día_x` vs `t_max_x+1`
-
-![Tmedia día x vs target](./report_correlation/plots/tmedia_dia_x__vs__t_max_x+1.png)
-
-### `Tmin_día_x` vs `t_max_x+1`
-
-![Tmin día x vs target](./report_correlation/plots/tmin_dia_x__vs__t_max_x+1.png)
-
-### `Tmax_día_x` vs `t_max_x+1`
-
-![Tmax día x vs target](./report_correlation/plots/tmax_dia_x__vs__t_max_x+1.png)
-
-### `MA_Tmax_3d` vs `t_max_x+1`
-
-![MA Tmax 3d vs target](./report_correlation/plots/ma_tmax_3d__vs__t_max_x+1.png)
-
-### `Punto_de_rocío_día_x (Td)` vs `t_max_x+1`
-
-![Punto de rocío vs target](./report_correlation/plots/punto_de_rocio_dia_x_td__vs__t_max_x+1.png)
-
-### `doy_cos` vs `t_max_x+1`
-
-![doy cos vs target](./report_correlation/plots/doy_cos__vs__t_max_x+1.png)
-
-### `DTR_x` vs `t_max_x+1`
-
-![DTR x vs target](./report_correlation/plots/dtr_x__vs__t_max_x+1.png)
-
-### `doy_sin` vs `t_max_x+1`
-
-![doy sin vs target](./report_correlation/plots/doy_sin__vs__t_max_x+1.png)
-
-### `Viento_vel_media_día_x` vs `t_max_x+1`
-
-![Viento velocidad media vs target](./report_correlation/plots/viento_vel_media_dia_x__vs__t_max_x+1.png)
-
-### `Viento_dir_cos(x)` vs `t_max_x+1`
-
-![Viento dirección cos vs target](./report_correlation/plots/viento_dir_cos_x__vs__t_max_x+1.png)
-
-### `ΔTmax_1d` vs `t_max_x+1`
-
-![Delta Tmax 1d vs target](./report_correlation/plots/tmax_1d__vs__t_max_x+1.png)
-
-### `Viento_dir_sin(x)` vs `t_max_x+1`
-
-![Viento dirección sin vs target](./report_correlation/plots/viento_dir_sin_x__vs__t_max_x+1.png)
-
-### `HR_media_día_x` vs `t_max_x+1`
-
-![HR media día x vs target](./report_correlation/plots/hr_media_dia_x__vs__t_max_x+1.png)
-
-### `Nubosidad_media_día_x` vs `t_max_x+1`
-
-![Nubosidad media día x vs target](./report_correlation/plots/nubosidad_media_dia_x__vs__t_max_x+1.png)
-
-### `Presión_media_día_x (SLP)` vs `t_max_x+1`
-
-![Presión media día x vs target](./report_correlation/plots/presion_media_dia_x_slp__vs__t_max_x+1.png)
-
-### `ΔPresión_24h` vs `t_max_x+1`
-
-![Delta presión 24h vs target](./report_correlation/plots/presion_24h__vs__t_max_x+1.png)
-
-### `Precipitación_acum_día_x` vs `t_max_x+1`
-
-![Precipitación acumulada vs target](./report_correlation/plots/precipitacion_acum_dia_x__vs__t_max_x+1.png)
-
-
-</details>
 
 
 
