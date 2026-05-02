@@ -1223,7 +1223,13 @@ Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 
 ![backtesting](./images/backtesting.png)
 
-## Nuevas features
+
+</details>
+
+<details>
+<summary><strong>Nuevas features</strong></summary>
+
+
 
 | Rank | Feature propuesta                         | Posibilidad de mejora | Idea                                                                                                                     |
 | ---: | ----------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -1249,8 +1255,10 @@ Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 |   20 | `extreme_heat_flag` / `extreme_cold_flag` | Media                 | Flag si el día actual está sobre percentil 90 o bajo percentil 10 histórico para ese DOY.                                |
 
 
-
 </details>
+
+
+
 
 
 
