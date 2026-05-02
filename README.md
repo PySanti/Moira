@@ -25,7 +25,9 @@ El objetivo de este proyecto es crear un bot que se conectará con Polymarket pa
 # Sprint 1 - V0
 
 
-## Definición y refinamiento de features
+<details>
+<summary><strong>Definición y refinamiento de features</strong></summary>
+
 
 Nota: es importante tener en cuenta las horas de ejecución del bot, esto porque el bot se entrenará con data conseguida al final de los días; entonces, mientras más hacia el final del día se ejecute, más preciso será porque más se ajustará a su contexto de entrenamiento.
 
@@ -59,7 +61,12 @@ Empezaré con una cantidad reducida de features para ampliar posiblemente en el 
 **Nota**: `dia`, `mes` y `año` son redundantes teniendo `doy_sin` y `doy_cos`; dejarlos únicamente para identificar registros y descartarlos para entrenamiento e inferencia.
 
 
-## Desarrollo de función para consulta a API
+
+</details>
+
+<details>
+<summary><strong>Desarrollo de función para consulta a API</strong></summary>
+
 
 Esta función consultará las siguientes fuentes:
 
@@ -391,7 +398,12 @@ La función fue testeada para:
 * Consistencia de unidades.
 * Correspondencia con valores históricos de Polymarket para todos los Tmax y Tmin.
 
-## Generación de dataset 1.0
+
+</details>
+
+<details>
+<summary><strong>Generación de dataset 1.0</strong></summary>
+
 
 Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
 
@@ -435,7 +447,12 @@ doy_cos
 
 
 
-## Entrenamiento de modelo
+
+</details>
+
+<details>
+<summary><strong>Entrenamiento de modelo</strong></summary>
+
 
 ### Entrenamiento 1.0
 
@@ -1169,13 +1186,23 @@ if __name__ == "__main__":
 
 
 
+
+</details>
+
 # Sprint 2 - V0
 
-## Sesgos introducidos en SPRINT 1 - V0
+<details>
+<summary><strong>Sesgos introducidos en SPRINT 1 - V0</strong></summary>
+
 
 * La validacion random o por otoño provoca que en validacion hayan muchos registros muy parecidos a los ya vistos por el modelo en train.
 
-## Tareas para el SPRINT 2 - V0
+
+</details>
+
+<details>
+<summary><strong>Tareas para el SPRINT 2 - V0</strong></summary>
+
 
 Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 
@@ -1200,7 +1227,12 @@ Luego:
 
 
 
-## Analisis de correlaciones feature - target
+
+</details>
+
+<details>
+<summary><strong>Analisis de correlaciones feature - target</strong></summary>
+
 
 | Ranking | Feature                     | Score |
 | ------: | --------------------------- | ----: |
@@ -1233,14 +1265,6 @@ Luego:
 
 <details>
 <summary>Ver gráficos de correlación feature-target</summary>
-
-### `date` vs `t_max_x+1`
-
-![date vs target](./report_correlation/plots/date__vs__t_max_x+1.png)
-
-### `date_str` vs `t_max_x+1`
-
-![date_str vs target](./report_correlation/plots/date_str__vs__t_max_x+1.png)
 
 ### `Tmedia_día_x` vs `t_max_x+1`
 
@@ -1310,12 +1334,12 @@ Luego:
 
 ![Precipitación acumulada vs target](./report_correlation/plots/precipitacion_acum_dia_x__vs__t_max_x+1.png)
 
-### `ciudad` vs `t_max_x+1`
-
-![Ciudad vs target](./report_correlation/plots/ciudad__vs__t_max_x+1.png)
 
 </details>
 
+
+
+</details>
 
 # Desarrollo de V1
 
