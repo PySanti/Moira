@@ -9,12 +9,14 @@ trello : https://trello.com/b/R37KNQzR/moira
 
 ![Version 0 image](./images/v0.png)
 
-# Definicion modular de requisitos para V0
+## Definicion modular de requisitos para V0
 
 * Funcion de consumo de data 
 * Generacion de dataset para entrenamiento
 * Entrenamiento de modelo
 * Fusion de piezas para flujo
+
+# Sprint 1
 
 ## Desarrollo de funcion para consulta a API
 
@@ -50,27 +52,27 @@ En esta seccion definire las features que se utilizaran para predecir la tempera
 Empezare con una cantidad reducida de features para ampliar posiblemente en el futuro, mientras mas features, mas complicado construir la funcion.
 
 
-| Nombre de feature                  |         Unidad | Rango de valores (típico) | Significado (incluye cálculo)                                                                              |
-| ---------------------------------- | -------------: | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Tmax_día_x**                     |             °C | ~ -50 a 55                | **Cálculo:** `Tmax[x]`. Máxima del día *x* (persistencia térmica).                                         |
-| **Tmin_día_x**                     |             °C | ~ -60 a 35                | **Cálculo:** `Tmin[x]`. Mínima del día *x* (masa de aire/enfriamiento nocturno).                           |
-| **Tmedia_día_x**                   |             °C | ~ -55 a 45                | **Cálculo:** `(Tmax[x] + Tmin[x]) / 2` (o `Tmed[x]`). Estado térmico general.                              |
-| **ΔTmax_1d**                       |             °C | ~ -20 a 20                | **Cálculo:** `Tmax[x] − Tmax[x−1]`. Tendencia/cambio reciente.                                             |
-| **MA_Tmax_3d**                     |             °C | ~ -50 a 55                | **Cálculo:** `(Tmax[x] + Tmax[x−1] + Tmax[x−2]) / 3`. Inercia térmica de corto plazo.                      |
-| **DTR_x**                          |             °C | ~ 0 a 25 (puede >30)      | **Cálculo:** `Tmax[x] − Tmin[x]`. Amplitud térmica; proxy nubosidad/humedad.                               |
-| **HR_media_día_x**                 |              % | 0 a 100                   | **Cálculo:** `HR_mean[x]`. Humedad relativa media diaria.                                                  |
-| **Punto_de_rocío_día_x (Td)**      |             °C | ~ -60 a 30+               | **Cálculo:** `Td[x]` (preferible si viene en el dataset). Contenido real de vapor de agua.                 |
-| **Presión_media_día_x (SLP)**      |            hPa | ~ 870 a 1085              | **Cálculo:** `SLP_mean[x]`. Señal sinótica (altas/bajas).                                                  |
-| **ΔPresión_24h**                   |            hPa | ~ -20 a 20                | **Cálculo:** `SLP_mean[x] − SLP_mean[x−1]`. Cambio sinótico rápido.                                        |
-| **Viento_vel_media_día_x**         |            m/s | 0 a 30 (rachas mayores)   | **Cálculo:** `wind_speed_mean[x]`. Mezcla/advección.                                                       |
-| **Viento_dir_sin(x)**              |              — | -1 a 1                    | **Cálculo:** `sin(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
-| **Viento_dir_cos(x)**              |              — | -1 a 1                    | **Cálculo:** `cos(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
-| **Nubosidad_media_día_x**          | % (o fracción) | 0–100 (o 0–1)             | **Cálculo:** `cloud_cover_mean[x]`. Control de radiación entrante.                                         |
-| **Precipitación_acum_día_x**       |         mm/día | 0 a 300+                  | **Cálculo:** `precip_sum[x]`. Efecto de lluvia/nubosidad/evaporación.                                      |
-| **t_max_x+1 (si está disponible)** |             °C | ~ -50 a 55                | **Cálculo:** `Tmax[x+1]`. **Label/objetivo** para entrenamiento; **no usar como feature** en inferencia.   |
-| **ciudad**                         |      categoría | N categorías              | **Cálculo:** ID/nombre. Se codifica (one-hot/target encoding/embeddings) para capturar climatología local. |
-| **doy_sin**                        |              — | -1 a 1                    | **Cálculo:** `sin(2π * doy / 365)`. Estacionalidad en forma cíclica (diciembre cerca de enero).            |
-| **doy_cos**                        |              — | -1 a 1                    | **Cálculo:** `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
+| Nombre de feature                  |         Unidad | Significado (incluye cálculo)                                                                              |
+| ---------------------------------- | -------------: | ---------------------------------------------------------------------------------------------------------- |
+| **Tmax_día_x**                     |             °C |`Tmax[x]`. Máxima del día *x* (persistencia térmica).                                         |
+| **Tmin_día_x**                     |             °C | `Tmin[x]`. Mínima del día *x* (masa de aire/enfriamiento nocturno).                           |
+| **Tmedia_día_x**                   |             °C | `(Tmax[x] + Tmin[x]) / 2` (o `Tmed[x]`). Estado térmico general.                              |
+| **ΔTmax_1d**                       |             °C | `Tmax[x] − Tmax[x−1]`. Tendencia/cambio reciente.                                             |
+| **MA_Tmax_3d**                     |             °C | `(Tmax[x] + Tmax[x−1] + Tmax[x−2]) / 3`. Inercia térmica de corto plazo.                      |
+| **DTR_x**                          |             °C | `Tmax[x] − Tmin[x]`. Amplitud térmica; proxy nubosidad/humedad.                               |
+| **HR_media_día_x**                 |              % | `HR_mean[x]`. Humedad relativa media diaria.                                                  |
+| **Punto_de_rocío_día_x (Td)**      |             °C | `Td[x]` (preferible si viene en el dataset). Contenido real de vapor de agua.                 |
+| **Presión_media_día_x (SLP)**      |            hPa | `SLP_mean[x]`. Señal sinótica (altas/bajas).                                                  |
+| **ΔPresión_24h**                   |            hPa | `SLP_mean[x] − SLP_mean[x−1]`. Cambio sinótico rápido.                                        |
+| **Viento_vel_media_día_x**         |            m/s | `wind_speed_mean[x]`. Mezcla/advección.                                                       |
+| **Viento_dir_sin(x)**              |              — | `sin(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
+| **Viento_dir_cos(x)**              |              — | `cos(2π * wind_dir_deg[x] / 360)`. Codificación circular de dirección.                        |
+| **Nubosidad_media_día_x**          | % (o fracción) | `cloud_cover_mean[x]`. Control de radiación entrante.                                         |
+| **Precipitación_acum_día_x**       |         mm/día | `precip_sum[x]`. Efecto de lluvia/nubosidad/evaporación.                                      |
+| **t_max_x+1 (si está disponible)** |             °C | `Tmax[x+1]`. **Label/objetivo** para entrenamiento; **no usar como feature** en inferencia.   |
+| **ciudad**                         |      categoría | ID/nombre. Se codifica (one-hot/target encoding/embeddings) para capturar climatología local. |
+| **doy_sin**                        |              — | `sin(2π * doy / 365)`. Estacionalidad en forma cíclica (diciembre cerca de enero).            |
+| **doy_cos**                        |              — | `cos(2π * doy / 365)`. Complementa `doy_sin` para representar el ciclo anual.                 |
 
 **Nota**: `dia`, `mes` y `año` , son redundantes teniendo `doy_sin` y `doy_cos`, dejarlo unicamente para identificar registros, descartarlos para entrenamiento e inferencia.
 
@@ -371,7 +373,7 @@ def get_weather_features(city: str, date_str: str, strict: bool = True) -> dict:
 
 ### Testeo de funcion
 
-La funcion fue testeada por:
+La funcion fue testeada para:
 
 * Posibles bloqueos por rate limiting 
 * Velocidad de respuesta promedio
@@ -391,17 +393,16 @@ Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obt
 Dimensiones de dataset 15118 x  21
 ```
 
-Posteriormente, se genero el valset utilizando registros de otono a traves del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
+Posteriormente, se genero el valset utilizando registros de otoño a traves del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
 
 ```
 Dimensiones de train 11392 x  21
-Dimensiones de train 3726 x  21
+Dimensiones de val 3726 x  21
 ```
 
 La lista de features es:
 
 ```
-
 date
 date_str
 Tmax_día_x
