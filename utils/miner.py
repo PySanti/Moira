@@ -1,3 +1,8 @@
+"""
+Recorre un rango histórico de fechas y genera registros tabulares para entrenamiento.
+Guarda cada fila con sus features del día X y el target
+"""
+
 import os
 import time
 import random

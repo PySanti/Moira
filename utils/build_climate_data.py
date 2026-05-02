@@ -1,3 +1,8 @@
+"""
+Consulta las APIs climáticas necesarias para obtener datos históricos o recientes del día X.
+Actualmente combina NCEI/GHCND para Tmax/Tmin y Open-Meteo para variables meteorológicas complementarias
+"""
+
 import requests
 import pandas as pd
 import numpy as np
