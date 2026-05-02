@@ -1223,6 +1223,30 @@ Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 
 ![backtesting](./images/backtesting.png)
 
+## Nuevas features
+
+| Rank | Feature propuesta                         | Posibilidad de mejora | Idea                                                                                                                     |
+| ---: | ----------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+|    1 | `forecast_tmax_x+1`                       | Muy alta              | Pronóstico externo de Tmax para mañana. Sería la feature más potente si la fuente está disponible antes de apostar.      |
+|    2 | `forecast_error_tmax_lag1`                | Muy alta              | Error del forecast de ayer: `Tmax_real[x] - forecast_Tmax[x]`. Ayuda a corregir sesgo reciente.                          |
+|    3 | `forecast_error_tmax_ma3`                 | Muy alta              | Promedio del error del forecast en los últimos 3 días. Captura si el modelo externo viene subestimando o sobreestimando. |
+|    4 | `climatology_tmax_doy`                    | Muy alta              | Promedio histórico de Tmax para ese día del año. Da una referencia climática normal.                                     |
+|    5 | `tmax_anomaly_x`                          | Muy alta              | `Tmax[x] - climatology_tmax_doy[x]`. Indica si el día actual está más caliente/frío de lo normal.                        |
+|    6 | `forecast_anomaly_x+1`                    | Muy alta              | `forecast_tmax_x+1 - climatology_tmax_doy[x+1]`. Indica qué tan extremo es el pronóstico de mañana.                      |
+|    7 | `tmax_lag2`                               | Alta                  | Tmax de hace 2 días. Refuerza persistencia térmica sin depender solo de `x`.                                             |
+|    8 | `tmax_lag3`                               | Alta                  | Tmax de hace 3 días. Captura continuidad o ruptura de patrón térmico.                                                    |
+|    9 | `tmax_lag7`                               | Alta                  | Tmax de hace 7 días. Puede capturar ciclos semanales/masas de aire persistentes.                                         |
+|   10 | `tmin_lag1`                               | Alta                  | Tmin del día anterior. Refuerza información de masa de aire nocturna.                                                    |
+|   11 | `tmean_ma7`                               | Alta                  | Media móvil de temperatura media en 7 días. Captura régimen térmico reciente.                                            |
+|   12 | `tmax_trend_3d`                           | Alta                  | Pendiente/tendencia de Tmax en los últimos 3 días. Mejor que solo `ΔTmax_1d`.                                            |
+|   13 | `tmax_trend_7d`                           | Media-alta            | Tendencia térmica semanal. Puede detectar calentamiento/enfriamiento progresivo.                                         |
+|   14 | `dtr_ma3`                                 | Media-alta            | Promedio móvil de amplitud térmica en 3 días. Resume nubosidad, humedad y estabilidad.                                   |
+|   15 | `td_anomaly_x`                            | Media-alta            | Punto de rocío actual menos su climatología histórica. Puede mejorar en días húmedos/calientes.                          |
+|   16 | `td_ma3`                                  | Media-alta            | Promedio de punto de rocío de 3 días. Captura masa de aire húmeda persistente.                                           |
+|   17 | `wind_u` / `wind_v`                       | Media                 | Componentes vectoriales del viento: velocidad × dirección. Mejor que velocidad y sin/cos separados.                      |
+|   18 | `pressure_trend_3d`                       | Media                 | Cambio de presión en 3 días. Puede capturar entrada/salida de frentes.                                                   |
+|   19 | `season` o `month`                        | Media                 | Aunque tienes `doy_sin/cos`, una variable de estación/mes puede ayudar a modelos de árboles.                             |
+|   20 | `extreme_heat_flag` / `extreme_cold_flag` | Media                 | Flag si el día actual está sobre percentil 90 o bajo percentil 10 histórico para ese DOY.                                |
 
 
 
