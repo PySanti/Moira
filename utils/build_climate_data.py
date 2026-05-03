@@ -1,18 +1,28 @@
 """
-Consulta las APIs climáticas necesarias para obtener datos históricos o recientes del día X.
+Consulta APIs climáticas para construir features as-of 23h del día X.
 
-Versión as-of 23h:
-- NCEI/GHCND Daily Summaries:
-    - TMAX[x-1], TMAX[x-2] para lags/MA.
-    - TMAX[x+1] para target oficial.
+Versión:
+- Mantiene features base as-of 23h.
+- Agrega únicamente nuevas features NO-FORECAST:
+    - climatology_tmax_doy
+    - tmax_anomaly_x
+    - tmax_lag2 / tmax_lag3 / tmax_lag7
+    - tmin_lag1
+    - tmean_ma7
+    - tmax_trend_3d / tmax_trend_7d
+    - dtr_ma3
+    - td_anomaly_x
+    - td_ma3
+    - wind_u / wind_v
+    - pressure_trend_3d
+    - month / season
+    - extreme_heat_flag / extreme_cold_flag
 
-- NCEI ISD-Lite / Global Hourly, estación LaGuardia:
-    - Temperatura horaria desde 00:00 hasta 23:00 del día X.
-    - HR, Td, SLP, viento y nubosidad cercanos a las 23:00.
-    - Precipitación acumulada desde 00:00 hasta 23:00.
-
-El objetivo es simular el momento real de ejecución del bot:
-día X a las 23:00 hora local de New York.
+No incluye:
+- forecast_tmax_x+1
+- forecast_error_tmax_lag1
+- forecast_error_tmax_ma3
+- forecast_anomaly_x+1
 """
 
 from __future__ import annotations
@@ -47,11 +57,114 @@ CITY_COORDS = {
     "londres":  {"lat": 51.5074, "lon": -0.1278, "tz": "Europe/London"},
 }
 
+DEFAULT_HISTORY_START_DATE = "1980-01-01"
+
+
+# ---------------- CACHES ----------------
+
+_NCEI_DAILY_CACHE: dict[tuple, pd.DataFrame] = {}
+_ISD_LITE_YEAR_CACHE: dict[tuple[str, int], pd.DataFrame] = {}
+
 
 # ---------------- HELPERS GENERALES ----------------
 
 def _safe(v):
     return None if (v is None or pd.isna(v)) else float(v)
+
+
+def _df_value(df: pd.DataFrame, ts: pd.Timestamp, col: str) -> float:
+    ts = pd.to_datetime(ts).normalize()
+
+    if ts not in df.index or col not in df.columns:
+        return np.nan
+
+    return df.loc[ts, col]
+
+
+def _linear_slope(values: np.ndarray | list[float]) -> float:
+    values = np.asarray(values, dtype=float)
+
+    if len(values) < 2 or np.isnan(values).any():
+        return np.nan
+
+    x = np.arange(len(values), dtype=float)
+
+    try:
+        return float(np.polyfit(x, values, deg=1)[0])
+    except Exception:
+        return np.nan
+
+
+def _mean_if_enough(values: np.ndarray | list[float], min_count: int) -> float:
+    values = np.asarray(values, dtype=float)
+    valid = values[np.isfinite(values)]
+
+    if len(valid) < min_count:
+        return np.nan
+
+    return float(valid.mean())
+
+
+def _season_from_month(month: int) -> str:
+    if month in [12, 1, 2]:
+        return "winter"
+    if month in [3, 4, 5]:
+        return "spring"
+    if month in [6, 7, 8]:
+        return "summer"
+    return "autumn"
+
+
+def _circular_doy_distance(doy_values: np.ndarray, target_doy: int) -> np.ndarray:
+    raw = np.abs(doy_values - target_doy)
+    return np.minimum(raw, 366 - raw)
+
+
+def _climatology_stats(
+    series: pd.Series,
+    target_ts: pd.Timestamp,
+    available_until_ts: pd.Timestamp,
+    window_days: int = 7,
+    min_records: int = 30,
+) -> dict:
+    """
+    Calcula climatología usando solo registros anteriores a available_until_ts.
+
+    Esto evita leakage temporal.
+    """
+    target_ts = pd.to_datetime(target_ts).normalize()
+    available_until_ts = pd.to_datetime(available_until_ts).normalize()
+
+    hist = series[series.index < available_until_ts].dropna()
+
+    if hist.empty:
+        return {
+            "mean": np.nan,
+            "p10": np.nan,
+            "p90": np.nan,
+            "n": 0,
+        }
+
+    target_doy = int(target_ts.dayofyear)
+    hist_doy = hist.index.dayofyear.to_numpy()
+    distances = _circular_doy_distance(hist_doy, target_doy)
+
+    selected = hist[distances <= window_days]
+
+    if len(selected) < min_records:
+        return {
+            "mean": np.nan,
+            "p10": np.nan,
+            "p90": np.nan,
+            "n": int(len(selected)),
+        }
+
+    return {
+        "mean": float(selected.mean()),
+        "p10": float(selected.quantile(0.10)),
+        "p90": float(selected.quantile(0.90)),
+        "n": int(len(selected)),
+    }
 
 
 def _nearest_observation_at_or_before(
@@ -139,8 +252,18 @@ def _fetch_ncei_daily(
 
     Unidades con units=metric:
     - TMAX/TMIN: °C
-    - PRCP: mm, si se solicita
+    - PRCP: mm, si se solicita.
     """
+    cache_key = (
+        station,
+        start_date,
+        end_date,
+        tuple(sorted([dt.upper() for dt in data_types])),
+    )
+
+    if cache_key in _NCEI_DAILY_CACHE:
+        return _NCEI_DAILY_CACHE[cache_key].copy()
+
     params = {
         "dataset": "daily-summaries",
         "stations": station,
@@ -213,6 +336,8 @@ def _fetch_ncei_daily(
         .set_index("time")
         .sort_index()
     )
+
+    _NCEI_DAILY_CACHE[cache_key] = df.copy()
 
     return df
 
@@ -316,12 +441,19 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
     URL esperada:
     https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/YYYY/STATION-YYYY.gz
     """
+    cache_key = (station, year)
+
+    if cache_key in _ISD_LITE_YEAR_CACHE:
+        return _ISD_LITE_YEAR_CACHE[cache_key].copy()
+
     url = f"{ISD_LITE_BASE_URL}/{year}/{station}-{year}.gz"
 
     r = requests.get(url, timeout=40)
 
     if r.status_code == 404:
-        return pd.DataFrame()
+        df_empty = pd.DataFrame()
+        _ISD_LITE_YEAR_CACHE[cache_key] = df_empty
+        return df_empty.copy()
 
     if r.status_code != 200:
         raise ConnectionError(
@@ -334,7 +466,9 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
         text = r.content.decode("utf-8", errors="replace")
 
     if not text.strip():
-        return pd.DataFrame()
+        df_empty = pd.DataFrame()
+        _ISD_LITE_YEAR_CACHE[cache_key] = df_empty
+        return df_empty.copy()
 
     cols = [
         "year",
@@ -357,6 +491,8 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
         names=cols,
         engine="python",
     )
+
+    _ISD_LITE_YEAR_CACHE[cache_key] = df.copy()
 
     return df
 
@@ -452,6 +588,52 @@ def _fetch_ncei_isd_lite_hourly(
     return raw
 
 
+def _build_23h_daily_from_hourly(
+    hourly: pd.DataFrame,
+    days: pd.DatetimeIndex,
+    execution_hour: int,
+    tolerance_hours: int,
+) -> pd.DataFrame:
+    """
+    Construye una tabla diaria tomando la observación más cercana a execution_hour,
+    sin usar observaciones futuras.
+    """
+    rows = []
+
+    for day_ts in days:
+        day_ts = pd.to_datetime(day_ts).normalize()
+        target_dt = day_ts + pd.Timedelta(hours=execution_hour)
+
+        obs = _nearest_observation_at_or_before(
+            hourly=hourly,
+            target_dt=target_dt,
+            tolerance_hours=tolerance_hours,
+        )
+
+        if obs.empty:
+            rows.append({
+                "time": day_ts,
+                "HR_23h": np.nan,
+                "Td_23h": np.nan,
+                "SLP_23h": np.nan,
+                "WindSpd_23h": np.nan,
+                "WindDir_23h": np.nan,
+                "Cloud_23h": np.nan,
+            })
+        else:
+            rows.append({
+                "time": day_ts,
+                "HR_23h": obs.get("HR", np.nan),
+                "Td_23h": obs.get("Td", np.nan),
+                "SLP_23h": obs.get("SLP", np.nan),
+                "WindSpd_23h": obs.get("WindSpd", np.nan),
+                "WindDir_23h": obs.get("WindDir", np.nan),
+                "Cloud_23h": obs.get("Cloud", np.nan),
+            })
+
+    return pd.DataFrame(rows).set_index("time").sort_index()
+
+
 # ---------------- MAIN ----------------
 
 def get_weather_features(
@@ -460,6 +642,10 @@ def get_weather_features(
     strict: bool = True,
     execution_hour: int = 23,
     nearest_tolerance_hours: int = 2,
+    history_start_date: str = DEFAULT_HISTORY_START_DATE,
+    climatology_window_days: int = 7,
+    min_climatology_records: int = 30,
+    compute_td_anomaly: bool = True,
 ) -> dict:
     """
     Genera features usando únicamente información disponible hasta las 23:00
@@ -474,6 +660,7 @@ def get_weather_features(
     Features:
       - Variables horarias vienen de ISD-Lite / sensores de LaGuardia.
       - Tmax/Tmin/Tmean del día X se calculan desde 00:00 hasta 23:00.
+      - No incluye features de forecast.
     """
     city_key = city.lower().strip()
 
@@ -491,12 +678,14 @@ def get_weather_features(
     next_ts = target_ts + pd.Timedelta(days=1)
 
     execution_dt = target_ts + pd.Timedelta(hours=execution_hour)
-    previous_execution_dt = execution_dt - pd.Timedelta(days=1)
+
+    history_start_ts = pd.to_datetime(history_start_date).normalize()
 
     # Daily Summaries:
-    # - x-2 y x-1 para lags/MA
-    # - x+1 para target
-    daily_start = target_ts - pd.Timedelta(days=2)
+    # - histórico completo para climatología Tmax.
+    # - x-7 para lags y medias.
+    # - x+1 para target.
+    daily_start = min(history_start_ts, target_ts - pd.Timedelta(days=7))
     daily_end = next_ts
 
     daily_idx = pd.date_range(daily_start, daily_end, freq="D")
@@ -508,10 +697,14 @@ def get_weather_features(
         data_types=["TMAX", "TMIN"],
     ).reindex(daily_idx)
 
+    ncei_daily["TMEAN"] = (ncei_daily["TMAX"] + ncei_daily["TMIN"]) / 2.0
+    ncei_daily["DTR"] = ncei_daily["TMAX"] - ncei_daily["TMIN"]
+
     # ISD-Lite horario:
-    # - x-1 para presión 23h del día anterior
-    # - x para features as-of 23h
-    hourly_start = target_ts - pd.Timedelta(days=1)
+    # - x-2 para td_ma3 y pressure_trend_3d.
+    # - x-1 para SLP 23h anterior.
+    # - x para features as-of 23h.
+    hourly_start = target_ts - pd.Timedelta(days=2)
     hourly_end = target_ts
 
     hourly = _fetch_ncei_isd_lite_hourly(
@@ -539,26 +732,39 @@ def get_weather_features(
         )
         return {}
 
-    obs_23 = _nearest_observation_at_or_before(
+    days_for_23h = pd.date_range(
+        target_ts - pd.Timedelta(days=2),
+        target_ts,
+        freq="D",
+    )
+
+    daily_23h = _build_23h_daily_from_hourly(
         hourly=hourly,
-        target_dt=execution_dt,
+        days=days_for_23h,
+        execution_hour=execution_hour,
         tolerance_hours=nearest_tolerance_hours,
     )
 
-    obs_prev_23 = _nearest_observation_at_or_before(
-        hourly=hourly,
-        target_dt=previous_execution_dt,
-        tolerance_hours=nearest_tolerance_hours,
-    )
+    obs_23 = daily_23h.loc[target_ts]
+    obs_prev_23 = daily_23h.loc[target_ts - pd.Timedelta(days=1)]
 
-    # ---------------- FEATURES TÉRMICAS AS-OF 23H ----------------
+    # ---------------- FEATURES BASE AS-OF 23H ----------------
 
     tmax_so_far_23h_x = day_rows["Temp_C"].max()
     tmin_so_far_23h_x = day_rows["Temp_C"].min()
     tmean_so_far_23h_x = day_rows["Temp_C"].mean()
 
-    tmax_x_minus_1 = ncei_daily.loc[target_ts - pd.Timedelta(days=1), "TMAX"]
-    tmax_x_minus_2 = ncei_daily.loc[target_ts - pd.Timedelta(days=2), "TMAX"]
+    tmax_x_minus_1 = _df_value(
+        ncei_daily,
+        target_ts - pd.Timedelta(days=1),
+        "TMAX",
+    )
+
+    tmax_x_minus_2 = _df_value(
+        ncei_daily,
+        target_ts - pd.Timedelta(days=2),
+        "TMAX",
+    )
 
     delta_tmax_so_far_1d_23h = (
         tmax_so_far_23h_x - tmax_x_minus_1
@@ -580,16 +786,14 @@ def get_weather_features(
         else np.nan
     )
 
-    # ---------------- FEATURES 23H ----------------
+    hr_23h_x = obs_23.get("HR_23h", np.nan)
+    td_23h_x = obs_23.get("Td_23h", np.nan)
+    slp_23h_x = obs_23.get("SLP_23h", np.nan)
+    wind_spd_23h_x = obs_23.get("WindSpd_23h", np.nan)
+    wind_dir_23h_x = obs_23.get("WindDir_23h", np.nan)
+    cloud_23h_x = obs_23.get("Cloud_23h", np.nan)
 
-    hr_23h_x = obs_23.get("HR", np.nan)
-    td_23h_x = obs_23.get("Td", np.nan)
-    slp_23h_x = obs_23.get("SLP", np.nan)
-    wind_spd_23h_x = obs_23.get("WindSpd", np.nan)
-    wind_dir_23h_x = obs_23.get("WindDir", np.nan)
-    cloud_23h_x = obs_23.get("Cloud", np.nan)
-
-    slp_23h_x_minus_1 = obs_prev_23.get("SLP", np.nan)
+    slp_23h_x_minus_1 = obs_prev_23.get("SLP_23h", np.nan)
 
     delta_slp_24h_23h = (
         slp_23h_x - slp_23h_x_minus_1
@@ -603,18 +807,154 @@ def get_weather_features(
 
     precip_sum_00_23h_x = _precip_sum_until_execution(day_rows)
 
+    # ---------------- NUEVAS FEATURES NO-FORECAST: GHCND ----------------
+
+    clim_tmax_x = _climatology_stats(
+        series=ncei_daily["TMAX"],
+        target_ts=target_ts,
+        available_until_ts=target_ts,
+        window_days=climatology_window_days,
+        min_records=min_climatology_records,
+    )
+
+    climatology_tmax_doy = clim_tmax_x["mean"]
+
+    tmax_anomaly_x = (
+        tmax_so_far_23h_x - climatology_tmax_doy
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(climatology_tmax_doy)
+        else np.nan
+    )
+
+    extreme_heat_flag = (
+        int(tmax_so_far_23h_x >= clim_tmax_x["p90"])
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(clim_tmax_x["p90"])
+        else np.nan
+    )
+
+    extreme_cold_flag = (
+        int(tmax_so_far_23h_x <= clim_tmax_x["p10"])
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(clim_tmax_x["p10"])
+        else np.nan
+    )
+
+    tmax_lag2 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMAX")
+    tmax_lag3 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=3), "TMAX")
+    tmax_lag7 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=7), "TMAX")
+
+    tmin_lag1 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "TMIN")
+
+    tmean_last_7 = [
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=i), "TMEAN")
+        for i in range(7, 0, -1)
+    ]
+
+    tmean_ma7 = _mean_if_enough(tmean_last_7, min_count=7)
+
+    tmax_trend_3d = _linear_slope([
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "TMAX"),
+        tmax_so_far_23h_x,
+    ])
+
+    tmax_trend_7d = _linear_slope([
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=6), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=5), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=4), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=3), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMAX"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "TMAX"),
+        tmax_so_far_23h_x,
+    ])
+
+    dtr_ma3 = _mean_if_enough([
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "DTR"),
+        _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "DTR"),
+        dtr_so_far_23h_x,
+    ], min_count=3)
+
+    # ---------------- NUEVAS FEATURES NO-FORECAST: ISD-LITE ----------------
+
+    td_values_3d = daily_23h.loc[
+        target_ts - pd.Timedelta(days=2): target_ts,
+        "Td_23h",
+    ].to_numpy(dtype=float)
+
+    td_ma3 = _mean_if_enough(td_values_3d, min_count=3)
+
+    slp_values_3d = daily_23h.loc[
+        target_ts - pd.Timedelta(days=2): target_ts,
+        "SLP_23h",
+    ].to_numpy(dtype=float)
+
+    pressure_trend_3d = _linear_slope(slp_values_3d)
+
+    wind_u = (
+        wind_spd_23h_x * np.sin(wind_rad)
+        if pd.notna(wind_spd_23h_x) and pd.notna(wind_rad)
+        else np.nan
+    )
+
+    wind_v = (
+        wind_spd_23h_x * np.cos(wind_rad)
+        if pd.notna(wind_spd_23h_x) and pd.notna(wind_rad)
+        else np.nan
+    )
+
+    # td_anomaly_x requiere climatología histórica de Td_23h.
+    td_anomaly_x = np.nan
+
+    if compute_td_anomaly:
+        td_history_start = history_start_ts
+        td_history_end = target_ts
+
+        hourly_history = _fetch_ncei_isd_lite_hourly(
+            station=LGA_ISD_LITE_STATION,
+            start_date=td_history_start.strftime("%Y-%m-%d"),
+            end_date=td_history_end.strftime("%Y-%m-%d"),
+            tz=CITY_COORDS[city_key]["tz"],
+        )
+
+        if not hourly_history.empty:
+            td_days = pd.date_range(td_history_start, td_history_end, freq="D")
+
+            td_daily_23h = _build_23h_daily_from_hourly(
+                hourly=hourly_history,
+                days=td_days,
+                execution_hour=execution_hour,
+                tolerance_hours=nearest_tolerance_hours,
+            )
+
+            clim_td_x = _climatology_stats(
+                series=td_daily_23h["Td_23h"],
+                target_ts=target_ts,
+                available_until_ts=target_ts,
+                window_days=climatology_window_days,
+                min_records=min_climatology_records,
+            )
+
+            td_climatology_doy = clim_td_x["mean"]
+
+            td_anomaly_x = (
+                td_23h_x - td_climatology_doy
+                if pd.notna(td_23h_x) and pd.notna(td_climatology_doy)
+                else np.nan
+            )
+
     # ---------------- ESTACIONALIDAD ----------------
 
     doy = target_ts.dayofyear
+    month = target_ts.month
+    season = _season_from_month(month)
+
     doy_sin = np.sin(2 * np.pi * doy / 365.25)
     doy_cos = np.cos(2 * np.pi * doy / 365.25)
 
     # ---------------- TARGET ----------------
 
-    target_x_plus_1 = ncei_daily.loc[next_ts, "TMAX"]
+    target_x_plus_1 = _df_value(ncei_daily, next_ts, "TMAX")
 
     features = {
-        # Térmicas as-of 23h
+        # Base as-of 23h
         "Tmax_so_far_23h_x": _safe(tmax_so_far_23h_x),
         "Tmin_so_far_23h_x": _safe(tmin_so_far_23h_x),
         "Tmean_so_far_23h_x": _safe(tmean_so_far_23h_x),
@@ -622,7 +962,6 @@ def get_weather_features(
         "MA_Tmax_3d_asof_23h": _safe(ma_tmax_3d_asof_23h),
         "DTR_so_far_23h_x": _safe(dtr_so_far_23h_x),
 
-        # Variables de sensores de LaGuardia cercanas a 23h
         "HR_23h_x": _safe(hr_23h_x),
         "Td_23h_x": _safe(td_23h_x),
         "SLP_23h_x": _safe(slp_23h_x),
@@ -631,9 +970,28 @@ def get_weather_features(
         "WindDir_sin_23h_x": _safe(wind_dir_sin_23h_x),
         "WindDir_cos_23h_x": _safe(wind_dir_cos_23h_x),
         "Cloud_23h_x": _safe(cloud_23h_x),
-
-        # Acumulada desde 00:00 hasta 23h
         "Precip_sum_00_23h_x": _safe(precip_sum_00_23h_x),
+
+        # Nuevas features no-forecast
+        "climatology_tmax_doy": _safe(climatology_tmax_doy),
+        "tmax_anomaly_x": _safe(tmax_anomaly_x),
+        "tmax_lag2": _safe(tmax_lag2),
+        "tmax_lag3": _safe(tmax_lag3),
+        "tmax_lag7": _safe(tmax_lag7),
+        "tmin_lag1": _safe(tmin_lag1),
+        "tmean_ma7": _safe(tmean_ma7),
+        "tmax_trend_3d": _safe(tmax_trend_3d),
+        "tmax_trend_7d": _safe(tmax_trend_7d),
+        "dtr_ma3": _safe(dtr_ma3),
+        "td_anomaly_x": _safe(td_anomaly_x),
+        "td_ma3": _safe(td_ma3),
+        "wind_u": _safe(wind_u),
+        "wind_v": _safe(wind_v),
+        "pressure_trend_3d": _safe(pressure_trend_3d),
+        "month": _safe(month),
+        "season": season,
+        "extreme_heat_flag": _safe(extreme_heat_flag),
+        "extreme_cold_flag": _safe(extreme_cold_flag),
 
         # Target oficial
         "t_max_x+1": _safe(target_x_plus_1),
@@ -645,11 +1003,19 @@ def get_weather_features(
     }
 
     if strict:
-        allowed_non_numeric = {"ciudad"}
+        allowed_non_numeric = {"ciudad", "season"}
+
+        # td_anomaly_x puede faltar al inicio del histórico si todavía no hay
+        # suficientes registros para construir climatología de Td_23h.
+        allowed_missing = {
+            "td_anomaly_x",
+        }
 
         missing_features = [
             k for k, v in features.items()
-            if k not in allowed_non_numeric and v is None
+            if k not in allowed_non_numeric
+            and k not in allowed_missing
+            and v is None
         ]
 
         if missing_features:
