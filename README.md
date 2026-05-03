@@ -7,6 +7,8 @@ El objetivo de este proyecto es crear un bot que se conectará con Polymarket pa
 
 **Objetivo de MAE en Celsius**: 0.26 máx.
 
+**Hora de ejecución del bot**: 23h del dia X.
+
 # Desarrollo de V0
 
 ![Versión 0 image](./images/v0.png)
@@ -1227,8 +1229,1383 @@ Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 </details>
 
 <details>
-<summary><strong>Nuevas features</strong></summary>
+<summary><strong>Modificacion de script para eliminacion de open-meteo</strong></summary>
 
+
+Actualmente, los valores de las features se obtienen de la siguiente forma:
+
+
+| Feature                       | Fuente                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| **Tmax_día_x**                | **NCEI/GHCND - LaGuardia Airport `USW00014732`**                                           |
+| **Tmin_día_x**                | **NCEI/GHCND - LaGuardia Airport `USW00014732`**                                           |
+| **t_max_x+1**                 | **NCEI/GHCND - LaGuardia Airport `USW00014732`**                                           |
+| **HR_media_día_x**            | **Open-Meteo Archive**                                                                     |
+| **Punto_de_rocío_día_x (Td)** | **Open-Meteo Archive**                                                                     |
+| **Presión_media_día_x (SLP)** | **Open-Meteo Archive**                                                                     |
+| **Viento_vel_media_día_x**    | **Open-Meteo Archive**                                                                     |
+| **Nubosidad_media_día_x**     | **Open-Meteo Archive**                                                                     |
+| **Precipitación_acum_día_x**  | **Open-Meteo Archive**                                                                     |
+| **Tmedia_día_x**              | **Calculada internamente** a partir de `Tmax` y `Tmin` de NCEI/GHCND                       |
+| **ΔTmax_1d**                  | **Calculada internamente** a partir de `Tmax[x]` y `Tmax[x-1]` de NCEI/GHCND               |
+| **MA_Tmax_3d**                | **Calculada internamente** a partir de `Tmax[x]`, `Tmax[x-1]` y `Tmax[x-2]` de NCEI/GHCND  |
+| **DTR_x**                     | **Calculada internamente** a partir de `Tmax` y `Tmin` de NCEI/GHCND                       |
+| **ΔPresión_24h**              | **Calculada internamente** a partir de `SLP[x]` y `SLP[x-1]` de Open-Meteo Archive         |
+| **Viento_dir_sin(x)**         | **Calculada internamente** a partir de `wind_direction_10m_dominant` de Open-Meteo Archive |
+| **Viento_dir_cos(x)**         | **Calculada internamente** a partir de `wind_direction_10m_dominant` de Open-Meteo Archive |
+| **doy_sin**                   | **Calculada internamente** a partir de la fecha del registro                               |
+| **doy_cos**                   | **Calculada internamente** a partir de la fecha del registro                               |
+| **ciudad**                    | **Input/configuración interna del script**                                                 |
+
+El problema es que obtener data de fuentes/sensores diferentes puede provocar un desalineamiento entre feature y targets, por lo cual, lo mejor es obtener todos los valores de la misma estacion (no necesariamente misma fuente).
+
+Teniendo en cuenta lo anterior, se modifico el modulo `./utils/build_climate_data.py` para obtener todos los datos de la misma estacion: el aeropuerto LaGuardia de NY.
+
+
+```python
+"""
+Consulta las APIs climáticas necesarias para obtener datos históricos o recientes del día X.
+
+Versión modificada:
+- NCEI/GHCND Daily Summaries:
+    - Tmax
+    - Tmin
+    - PRCP
+    - target t_max_x+1
+
+- NCEI ISD-Lite / Global Hourly, estación LaGuardia:
+    - HR_media_día_x
+    - Punto_de_rocío_día_x (Td)
+    - Presión_media_día_x (SLP)
+    - Viento_vel_media_día_x
+    - WindDir para sin/cos
+    - Nubosidad_media_día_x
+    - Precipitación como fallback si PRCP diario no está disponible
+
+Nota:
+ISD-Lite usa observaciones horarias. Para generar features diarias,
+el script agrega los registros horarios por día local de New York.
+"""
+
+from __future__ import annotations
+
+import gzip
+from io import StringIO
+from datetime import datetime, timedelta
+
+import requests
+import pandas as pd
+import numpy as np
+
+
+# ---------------- CONFIG ----------------
+
+NCEI_DATA_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
+
+# Daily Summaries / GHCND
+LGA_GHCND_STATION = "USW00014732"  # LaGuardia Airport - GHCND
+
+# ISD-Lite / Global Hourly
+# Formato ISD: USAF-WBAN
+# LaGuardia suele usarse como 725030-14732.
+LGA_ISD_LITE_STATION = "725030-14732"
+ISD_LITE_BASE_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-lite"
+
+CITY_COORDS = {
+    "new york": {"lat": 40.7128, "lon": -74.0060, "tz": "America/New_York"},
+    "chicago":  {"lat": 41.8781, "lon": -87.6298, "tz": "America/Chicago"},
+    "atlanta":  {"lat": 33.7490, "lon": -84.3880, "tz": "America/New_York"},
+    "seul":     {"lat": 37.5665, "lon": 126.9780, "tz": "Asia/Seoul"},
+    "londres":  {"lat": 51.5074, "lon": -0.1278, "tz": "Europe/London"},
+}
+
+
+# ---------------- HELPERS NCEI DAILY ----------------
+
+def _fetch_ncei_daily(
+    station: str,
+    start_date: str,
+    end_date: str,
+    data_types: list[str],
+) -> pd.DataFrame:
+    """
+    Descarga Daily Summaries de NCEI/GHCND.
+
+    Unidades con units=metric:
+    - TMAX/TMIN: °C
+    - PRCP: mm
+    """
+    params = {
+        "dataset": "daily-summaries",
+        "stations": station,
+        "startDate": start_date,
+        "endDate": end_date,
+        "dataTypes": ",".join(data_types),
+        "format": "json",
+        "units": "metric",
+        "includeStationName": "false",
+        "includeStationLocation": "false",
+        "includeAttributes": "false",
+    }
+
+    headers = {"User-Agent": "tmax-bot/1.0"}
+
+    r = requests.get(NCEI_DATA_URL, params=params, headers=headers, timeout=30)
+
+    if r.status_code != 200:
+        raise ConnectionError(f"Error NCEI Daily Summaries: {r.status_code} - {r.text[:300]}")
+
+    rows = r.json()
+
+    if not rows:
+        return pd.DataFrame()
+
+    def _find_key(d: dict, candidates: list[str]) -> str | None:
+        keys = {k.lower(): k for k in d.keys()}
+
+        for c in candidates:
+            if c.lower() in keys:
+                return keys[c.lower()]
+
+        return None
+
+    date_key = _find_key(rows[0], ["DATE", "date"])
+
+    if not date_key:
+        raise ValueError(f"NCEI: no encontré campo de fecha. Keys={list(rows[0].keys())}")
+
+    out = []
+
+    for row in rows:
+        rec = {"time": pd.to_datetime(row[date_key]).normalize()}
+
+        for dt in data_types:
+            val = None
+
+            for k in row.keys():
+                if k.upper() == dt.upper():
+                    val = row[k]
+                    break
+
+            if val in (None, "", "NaN"):
+                rec[dt.upper()] = np.nan
+            else:
+                try:
+                    rec[dt.upper()] = float(val)
+                except ValueError:
+                    rec[dt.upper()] = np.nan
+
+        out.append(rec)
+
+    df = (
+        pd.DataFrame(out)
+        .drop_duplicates(subset=["time"], keep="last")
+        .set_index("time")
+        .sort_index()
+    )
+
+    return df
+
+
+# ---------------- HELPERS ISD-LITE ----------------
+
+def _to_scaled_value(series: pd.Series, scale: float = 10.0) -> pd.Series:
+    """
+    ISD-Lite usa -9999 como missing.
+    Muchas variables vienen escaladas por 10.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    return s / scale
+
+
+def _to_unscaled_value(series: pd.Series) -> pd.Series:
+    """
+    Para variables sin escala decimal, como wind direction o sky condition.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    return s
+
+
+def _precip_scaled(series: pd.Series) -> pd.Series:
+    """
+    Precipitación ISD-Lite:
+    - -9999 = missing
+    - -1 = trace precipitation
+
+    Para ML diario, trato trace como 0.0 mm.
+    Si prefieres, puedes cambiarlo a 0.05 mm.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    s = s.replace(-1, 0.0)
+    return s / 10.0
+
+
+def _sky_condition_to_cloud_pct(code: float) -> float:
+    """
+    Convierte sky condition code de ISD-Lite a porcentaje aproximado de nubosidad.
+
+    Códigos principales:
+    0-8 representan oktas.
+    9 y 10 se tratan como missing/indeterminado.
+    11-19 son variantes textuales; se aproximan a porcentajes.
+    """
+    if pd.isna(code):
+        return np.nan
+
+    code = int(code)
+
+    if 0 <= code <= 8:
+        return (code / 8.0) * 100.0
+
+    # 9: sky obscured / cannot be estimated
+    # 10: partial obscuration
+    if code in [9, 10]:
+        return np.nan
+
+    # Aproximaciones:
+    # 11 thin scattered, 12 scattered, 13 dark scattered
+    if code in [11, 12, 13]:
+        return 37.5
+
+    # 14 thin broken, 15 broken, 16 dark broken
+    if code in [14, 15, 16]:
+        return 75.0
+
+    # 17 thin overcast, 18 overcast, 19 dark overcast
+    if code in [17, 18, 19]:
+        return 100.0
+
+    return np.nan
+
+
+def _relative_humidity_from_temp_dewpoint(temp_c: pd.Series, dewpoint_c: pd.Series) -> pd.Series:
+    """
+    Calcula humedad relativa aproximada usando temperatura y punto de rocío.
+
+    Fórmula Magnus:
+    RH = 100 * e(Td) / e(T)
+    """
+    temp_c = pd.to_numeric(temp_c, errors="coerce")
+    dewpoint_c = pd.to_numeric(dewpoint_c, errors="coerce")
+
+    a = 17.625
+    b = 243.04
+
+    es_td = np.exp((a * dewpoint_c) / (b + dewpoint_c))
+    es_t = np.exp((a * temp_c) / (b + temp_c))
+
+    rh = 100.0 * (es_td / es_t)
+    rh = rh.clip(lower=0.0, upper=100.0)
+
+    return rh
+
+
+def _circular_mean_degrees(series: pd.Series) -> float:
+    """
+    Promedio circular para dirección del viento.
+    """
+    s = pd.to_numeric(series, errors="coerce").dropna()
+
+    if s.empty:
+        return np.nan
+
+    rad = np.deg2rad(s)
+
+    mean_sin = np.sin(rad).mean()
+    mean_cos = np.cos(rad).mean()
+
+    if np.isclose(mean_sin, 0.0) and np.isclose(mean_cos, 0.0):
+        return np.nan
+
+    angle = np.rad2deg(np.arctan2(mean_sin, mean_cos)) % 360.0
+    return float(angle)
+
+
+def _daily_precip_from_isd(group: pd.DataFrame) -> float:
+    """
+    Calcula precipitación diaria desde ISD-Lite.
+
+    Preferencia:
+    1. Sumar precipitación 1h si hay suficientes observaciones.
+    2. Si no, usar precipitación 6h.
+    """
+    p1 = group["Precip_1h"].dropna()
+    p6 = group["Precip_6h"].dropna()
+
+    # Umbral conservador: si hay varias observaciones horarias, usamos 1h.
+    if len(p1) >= 6:
+        return float(p1.sum())
+
+    if len(p6) >= 1:
+        return float(p6.sum())
+
+    return np.nan
+
+
+def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
+    """
+    Descarga un año de ISD-Lite para una estación.
+
+    URL esperada:
+    https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/YYYY/STATION-YYYY.gz
+    """
+    url = f"{ISD_LITE_BASE_URL}/{year}/{station}-{year}.gz"
+
+    r = requests.get(url, timeout=40)
+
+    if r.status_code == 404:
+        return pd.DataFrame()
+
+    if r.status_code != 200:
+        raise ConnectionError(f"Error ISD-Lite {year}: {r.status_code} - {r.text[:200]}")
+
+    try:
+        text = gzip.decompress(r.content).decode("utf-8", errors="replace")
+    except OSError:
+        text = r.content.decode("utf-8", errors="replace")
+
+    if not text.strip():
+        return pd.DataFrame()
+
+    cols = [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "air_temperature",
+        "dew_point_temperature",
+        "sea_level_pressure",
+        "wind_direction",
+        "wind_speed",
+        "sky_condition",
+        "precip_1h",
+        "precip_6h",
+    ]
+
+    df = pd.read_csv(
+        StringIO(text),
+        sep=r"\s+",
+        names=cols,
+        engine="python",
+    )
+
+    return df
+
+
+def _fetch_ncei_isd_lite_daily(
+    station: str,
+    start_date: str,
+    end_date: str,
+    tz: str,
+) -> pd.DataFrame:
+    """
+    Descarga ISD-Lite horario y lo agrega a día local.
+
+    Retorna columnas:
+    - HR
+    - Td
+    - SLP
+    - WindSpd
+    - WindDir
+    - Cloud
+    - Precip_ISD
+    """
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize()
+
+    frames = []
+
+    for year in range(start_ts.year, end_ts.year + 1):
+        yearly = _fetch_isd_lite_year(station=station, year=year)
+
+        if yearly.empty:
+            continue
+
+        frames.append(yearly)
+
+    if not frames:
+        return pd.DataFrame()
+
+    raw = pd.concat(frames, ignore_index=True)
+
+    # Parse datetime.
+    # ISD global/hourly normalmente está en UTC. Convertimos a día local.
+    raw["datetime_utc"] = pd.to_datetime(
+        dict(
+            year=raw["year"],
+            month=raw["month"],
+            day=raw["day"],
+            hour=raw["hour"],
+        ),
+        errors="coerce",
+        utc=True,
+    )
+
+    raw = raw.dropna(subset=["datetime_utc"]).copy()
+
+    raw["datetime_local"] = (
+        raw["datetime_utc"]
+        .dt.tz_convert(tz)
+        .dt.tz_localize(None)
+    )
+
+    raw["time"] = raw["datetime_local"].dt.normalize()
+
+    # Convertir variables.
+    raw["Temp_C"] = _to_scaled_value(raw["air_temperature"], scale=10.0)
+    raw["Td"] = _to_scaled_value(raw["dew_point_temperature"], scale=10.0)
+    raw["SLP"] = _to_scaled_value(raw["sea_level_pressure"], scale=10.0)
+    raw["WindDir"] = _to_unscaled_value(raw["wind_direction"])
+    raw["WindSpd"] = _to_scaled_value(raw["wind_speed"], scale=10.0)
+
+    raw["Cloud"] = _to_unscaled_value(raw["sky_condition"]).apply(_sky_condition_to_cloud_pct)
+
+    raw["Precip_1h"] = _precip_scaled(raw["precip_1h"])
+    raw["Precip_6h"] = _precip_scaled(raw["precip_6h"])
+
+    raw["HR"] = _relative_humidity_from_temp_dewpoint(
+        temp_c=raw["Temp_C"],
+        dewpoint_c=raw["Td"],
+    )
+
+    # Limitar al rango pedido por día local.
+    raw = raw[(raw["time"] >= start_ts) & (raw["time"] <= end_ts)].copy()
+
+    if raw.empty:
+        return pd.DataFrame()
+
+    daily_basic = raw.groupby("time").agg(
+        HR=("HR", "mean"),
+        Td=("Td", "mean"),
+        SLP=("SLP", "mean"),
+        WindSpd=("WindSpd", "mean"),
+        Cloud=("Cloud", "mean"),
+        obs_count_isd=("Temp_C", "count"),
+    )
+
+    daily_wind_dir = raw.groupby("time")["WindDir"].apply(_circular_mean_degrees)
+    daily_precip = raw.groupby("time").apply(_daily_precip_from_isd)
+
+    daily = daily_basic.copy()
+    daily["WindDir"] = daily_wind_dir
+    daily["Precip_ISD"] = daily_precip
+
+    daily = daily.sort_index()
+
+    return daily
+
+
+# ---------------- MAIN ----------------
+
+def get_weather_features(city: str, date_str: str, strict: bool = True) -> dict:
+    """
+    strict=True:
+      - si faltan datos previos necesarios, retorna {}.
+    """
+    city_key = city.lower().strip()
+
+    if city_key not in CITY_COORDS:
+        raise ValueError(f"Ciudad no soportada. Use: {list(CITY_COORDS.keys())}")
+
+    if city_key != "new york":
+        raise ValueError(
+            "Esta versión solo implementa fuentes NCEI/LaGuardia para New York."
+        )
+
+    target_date = datetime.strptime(date_str, "%d-%m-%y")
+    next_day = target_date + timedelta(days=1)
+    start_date = target_date - timedelta(days=5)
+
+    api_start = start_date.strftime("%Y-%m-%d")
+    api_end = next_day.strftime("%Y-%m-%d")
+
+    expected_idx = pd.date_range(api_start, api_end, freq="D")
+
+    target_ts = pd.to_datetime(target_date.strftime("%Y-%m-%d")).normalize()
+    next_ts = pd.to_datetime(next_day.strftime("%Y-%m-%d")).normalize()
+
+    # 1) NCEI Daily Summaries / GHCND
+    # PRCP se intenta traer desde Daily Summaries.
+    ncei_daily = _fetch_ncei_daily(
+        station=LGA_GHCND_STATION,
+        start_date=api_start,
+        end_date=api_end,
+        data_types=["TMAX", "TMIN", "PRCP"],
+    ).reindex(expected_idx)
+
+    # 2) NCEI ISD-Lite / Global Hourly
+    ncei_hourly_daily = _fetch_ncei_isd_lite_daily(
+        station=LGA_ISD_LITE_STATION,
+        start_date=api_start,
+        end_date=api_end,
+        tz=CITY_COORDS[city_key]["tz"],
+    ).reindex(expected_idx)
+
+    # DataFrame unificado
+    df = pd.DataFrame(index=expected_idx)
+    df.index.name = "time"
+
+    # Temperatura oficial / target: GHCND Daily Summaries
+    df["Tmax"] = ncei_daily.get("TMAX")
+    df["Tmin"] = ncei_daily.get("TMIN")
+    df["Tmean"] = (df["Tmax"] + df["Tmin"]) / 2.0
+
+    # Variables complementarias: NCEI ISD-Lite
+    df["HR"] = ncei_hourly_daily.get("HR")
+    df["Td"] = ncei_hourly_daily.get("Td")
+    df["SLP"] = ncei_hourly_daily.get("SLP")
+    df["WindSpd"] = ncei_hourly_daily.get("WindSpd")
+    df["WindDir"] = ncei_hourly_daily.get("WindDir")
+    df["Cloud"] = ncei_hourly_daily.get("Cloud")
+
+    # Precipitación:
+    # preferimos PRCP de Daily Summaries; si falta, usamos ISD-Lite.
+    df["Precip"] = ncei_daily.get("PRCP")
+
+    if "Precip_ISD" in ncei_hourly_daily.columns:
+        df["Precip"] = df["Precip"].fillna(ncei_hourly_daily["Precip_ISD"])
+
+    # Derivadas
+    df["Delta_Tmax_1d"] = df["Tmax"] - df["Tmax"].shift(1)
+    df["MA_Tmax_3d"] = df["Tmax"].rolling(window=3, min_periods=3).mean()
+    df["DTR"] = df["Tmax"] - df["Tmin"]
+    df["Delta_Presion"] = df["SLP"] - df["SLP"].shift(1)
+
+    wind_rad = np.deg2rad(df["WindDir"])
+    df["Wind_sin"] = np.sin(wind_rad)
+    df["Wind_cos"] = np.cos(wind_rad)
+
+    df["doy"] = df.index.dayofyear
+    df["doy_sin"] = np.sin(2 * np.pi * df["doy"] / 365.25)
+    df["doy_cos"] = np.cos(2 * np.pi * df["doy"] / 365.25)
+
+    if target_ts not in df.index:
+        raise ValueError(f"No se encontró el día objetivo {target_ts.date()} en el índice reindexado.")
+
+    # ---------------- VALIDACIÓN STRICT ----------------
+
+    needed_days = {
+        "x-2": target_ts - pd.Timedelta(days=2),
+        "x-1": target_ts - pd.Timedelta(days=1),
+        "x": target_ts,
+        "x+1": next_ts,
+    }
+
+    requirements = []
+
+    # Tmax requeridos para:
+    # - ΔTmax_1d
+    # - MA_Tmax_3d
+    # - label x+1
+    for tag, day in needed_days.items():
+        requirements.append((f"NCEI_GHCND.Tmax({tag})", day, "Tmax"))
+
+    # Tmin requerido en x para Tmean y DTR.
+    requirements.append(("NCEI_GHCND.Tmin(x)", needed_days["x"], "Tmin"))
+
+    # Variables ISD-Lite para x.
+    for var in ["HR", "Td", "SLP", "WindSpd", "WindDir", "Cloud"]:
+        requirements.append((f"NCEI_ISD_LITE.{var}(x)", needed_days["x"], var))
+
+    # Precipitación diaria desde NCEI.
+    requirements.append(("NCEI.PRCP/ISD.Precip(x)", needed_days["x"], "Precip"))
+
+    # SLP de x-1 para ΔPresión_24h.
+    requirements.append(("NCEI_ISD_LITE.SLP(x-1)", needed_days["x-1"], "SLP"))
+
+    missing_items = []
+
+    for name, day, col in requirements:
+        if day not in df.index:
+            missing_items.append(f"{name}: day_out_of_range({day.date()})")
+            continue
+
+        if pd.isna(df.loc[day, col]):
+            missing_items.append(f"{name}: NaN")
+
+    if strict and missing_items:
+        print("Error: No se pudieron obtener TODOS los datos previos necesarios.")
+        for it in missing_items[:30]:
+            print(" -", it)
+
+        if len(missing_items) > 30:
+            print(f" - ... y {len(missing_items) - 30} más")
+
+        return {}
+
+    # ---------------- OUTPUT ----------------
+
+    target_row = df.loc[target_ts]
+
+    def _safe(v):
+        return None if (v is None or pd.isna(v)) else float(v)
+
+    features = {
+        "Tmax_día_x": _safe(target_row["Tmax"]),
+        "Tmin_día_x": _safe(target_row["Tmin"]),
+        "Tmedia_día_x": _safe(target_row["Tmean"]),
+        "ΔTmax_1d": _safe(target_row["Delta_Tmax_1d"]),
+        "MA_Tmax_3d": _safe(target_row["MA_Tmax_3d"]),
+        "DTR_x": _safe(target_row["DTR"]),
+
+        # Ahora vienen de NCEI ISD-Lite / LaGuardia
+        "HR_media_día_x": _safe(target_row["HR"]),
+        "Punto_de_rocío_día_x (Td)": _safe(target_row["Td"]),
+        "Presión_media_día_x (SLP)": _safe(target_row["SLP"]),
+        "ΔPresión_24h": _safe(target_row["Delta_Presion"]),
+        "Viento_vel_media_día_x": _safe(target_row["WindSpd"]),
+        "Viento_dir_sin(x)": _safe(target_row["Wind_sin"]),
+        "Viento_dir_cos(x)": _safe(target_row["Wind_cos"]),
+        "Nubosidad_media_día_x": _safe(target_row["Cloud"]),
+        "Precipitación_acum_día_x": _safe(target_row["Precip"]),
+
+        # Target oficial
+        "t_max_x+1": _safe(df.loc[next_ts, "Tmax"]),
+
+        # Metadata / estacionalidad
+        "ciudad": city,
+        "doy_sin": _safe(target_row["doy_sin"]),
+        "doy_cos": _safe(target_row["doy_cos"]),
+    }
+
+    return features
+```
+
+| Feature                     | Fuente real en el script                                                                | Cómo se obtiene                                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Tmax_día_x`                | **NCEI Daily Summaries / GHCND - LaGuardia `USW00014732`**                              | Viene de `TMAX` solicitado en `_fetch_ncei_daily(...)`.                                                         |
+| `Tmin_día_x`                | **NCEI Daily Summaries / GHCND - LaGuardia `USW00014732`**                              | Viene de `TMIN` solicitado en `_fetch_ncei_daily(...)`.                                                         |
+| `Tmedia_día_x`              | **Cálculo interno desde NCEI GHCND**                                                    | `(Tmax + Tmin) / 2.0`.                                                                                          |
+| `ΔTmax_1d`                  | **Cálculo interno desde NCEI GHCND**                                                    | `Tmax[x] - Tmax[x-1]`.                                                                                          |
+| `MA_Tmax_3d`                | **Cálculo interno desde NCEI GHCND**                                                    | Media móvil de 3 días de `Tmax`.                                                                                |
+| `DTR_x`                     | **Cálculo interno desde NCEI GHCND**                                                    | `Tmax - Tmin`.                                                                                                  |
+| `HR_media_día_x`            | **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`**                            | Se calcula desde temperatura horaria y punto de rocío horario usando fórmula Magnus; luego se promedia por día. |
+| `Punto_de_rocío_día_x (Td)` | **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`**                            | Viene de `dew_point_temperature`, escalado `/10`, luego promedio diario.                                        |
+| `Presión_media_día_x (SLP)` | **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`**                            | Viene de `sea_level_pressure`, escalado `/10`, luego promedio diario.                                           |
+| `ΔPresión_24h`              | **Cálculo interno desde NCEI ISD-Lite**                                                 | `SLP[x] - SLP[x-1]`.                                                                                            |
+| `Viento_vel_media_día_x`    | **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`**                            | Viene de `wind_speed`, escalado `/10`, luego promedio diario.                                                   |
+| `Viento_dir_sin(x)`         | **Cálculo interno desde NCEI ISD-Lite**                                                 | Primero calcula dirección media circular diaria desde `wind_direction`; luego aplica `sin`.                     |
+| `Viento_dir_cos(x)`         | **Cálculo interno desde NCEI ISD-Lite**                                                 | Primero calcula dirección media circular diaria desde `wind_direction`; luego aplica `cos`.                     |
+| `Nubosidad_media_día_x`     | **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`, con conversión aproximada** | Convierte `sky_condition` a porcentaje aproximado de nubosidad y luego promedia por día.                        |
+| `Precipitación_acum_día_x`  | **NCEI Daily Summaries / GHCND como fuente principal; ISD-Lite como fallback**          | Primero usa `PRCP` de Daily Summaries; si falta, usa `Precip_ISD` calculada desde precipitación horaria 1h/6h.  |
+| `t_max_x+1`                 | **NCEI Daily Summaries / GHCND - LaGuardia `USW00014732`**                              | Viene de `TMAX` del día `x+1`. Es el label/target.                                                              |
+| `ciudad`                    | **Input/configuración interna**                                                         | Es el argumento `city` recibido por `get_weather_features(...)`.                                                |
+| `doy_sin`                   | **Cálculo interno desde fecha**                                                         | `sin(2π * doy / 365.25)`.                                                                                       |
+| `doy_cos`                   | **Cálculo interno desde fecha**                                                         | `cos(2π * doy / 365.25)`.                                                                                       |
+
+
+
+</details>
+
+<details>
+<summary><strong>Modificacion de hora de referencia para consumo de valores de features</strong></summary>
+
+Hay un detalle importante a destacar: el plan es ejecutar el bot a las 23h del dia X para obtener la temperatura maxima del dia x+1. Teniendo en cuenta eso, el bot debe entrenarse usando valores de features disponibles a las 23h, ni mas ni menos. Teniendo eso en cuenta:
+
+**Nueva version de features**
+
+| Feature                    |    Unidad | Fuente de extracción                                 | Cálculo                                                                                                                              |
+| -------------------------- | --------: | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Tmax_so_far_23h_x`        |        °C | NCEI ISD-Lite / LaGuardia `725030-14732`             | Máximo de `Temp_C` observado entre 00:00 y 23:00 del día X.                                                                          |
+| `Tmin_so_far_23h_x`        |        °C | NCEI ISD-Lite / LaGuardia `725030-14732`             | Mínimo de `Temp_C` observado entre 00:00 y 23:00 del día X.                                                                          |
+| `Tmean_so_far_23h_x`       |        °C | NCEI ISD-Lite / LaGuardia `725030-14732`             | Promedio de `Temp_C` observado entre 00:00 y 23:00 del día X.                                                                        |
+| `Delta_Tmax_so_far_1d_23h` |        °C | Mixta: ISD-Lite + NCEI/GHCND                         | `Tmax_so_far_23h_x - TMAX[x-1]`.                                                                                                     |
+| `MA_Tmax_3d_asof_23h`      |        °C | Mixta: ISD-Lite + NCEI/GHCND                         | `(Tmax_so_far_23h_x + TMAX[x-1] + TMAX[x-2]) / 3`.                                                                                   |
+| `DTR_so_far_23h_x`         |        °C | NCEI ISD-Lite / LaGuardia `725030-14732`             | `Tmax_so_far_23h_x - Tmin_so_far_23h_x`.                                                                                             |
+| `HR_23h_x`                 |         % | NCEI ISD-Lite / LaGuardia `725030-14732`             | Humedad relativa calculada con fórmula Magnus desde `Temp_C` y `Td`; se toma la observación más cercana a las 23:00 sin usar futuro. |
+| `Td_23h_x`                 |        °C | NCEI ISD-Lite / LaGuardia `725030-14732`             | `dew_point_temperature / 10`; se toma la observación más cercana a las 23:00 sin usar futuro.                                        |
+| `SLP_23h_x`                |       hPa | NCEI ISD-Lite / LaGuardia `725030-14732`             | `sea_level_pressure / 10`; se toma la observación más cercana a las 23:00 sin usar futuro.                                           |
+| `Delta_SLP_24h_23h`        |       hPa | NCEI ISD-Lite / LaGuardia `725030-14732`             | `SLP_23h[x] - SLP_23h[x-1]`.                                                                                                         |
+| `WindSpd_23h_x`            |       m/s | NCEI ISD-Lite / LaGuardia `725030-14732`             | `wind_speed / 10`; se toma la observación más cercana a las 23:00 sin usar futuro.                                                   |
+| `WindDir_sin_23h_x`        |         — | NCEI ISD-Lite / LaGuardia `725030-14732`             | `sin(WindDir_23h_x en radianes)`.                                                                                                    |
+| `WindDir_cos_23h_x`        |         — | NCEI ISD-Lite / LaGuardia `725030-14732`             | `cos(WindDir_23h_x en radianes)`.                                                                                                    |
+| `Cloud_23h_x`              |  % aprox. | NCEI ISD-Lite / LaGuardia `725030-14732`             | Convierte `sky_condition` a porcentaje aproximado y toma la observación más cercana a las 23:00.                                     |
+| `Precip_sum_00_23h_x`      |        mm | NCEI ISD-Lite / LaGuardia `725030-14732`             | Suma `Precip_1h` desde 00:00 hasta 23:00; si no hay suficientes registros, usa `Precip_6h` como fallback.                            |
+| `t_max_x+1`                |        °C | NCEI/GHCND Daily Summaries / LaGuardia `USW00014732` | `TMAX[x+1]`. Es el target oficial para entrenamiento.                                                                                |
+| `ciudad`                   | categoría | Input/configuración interna                          | Valor del argumento `city`; actualmente solo se permite `new york`.                                                                  |
+| `doy_sin`                  |         — | Cálculo interno desde fecha                          | `sin(2π * day_of_year / 365.25)`.                                                                                                    |
+| `doy_cos`                  |         — | Cálculo interno desde fecha                          | `cos(2π * day_of_year / 365.25)`.                                                                                                    |
+
+
+**Nueva version de script**
+
+```python
+"""
+Consulta las APIs climáticas necesarias para obtener datos históricos o recientes del día X.
+
+Versión as-of 23h:
+- NCEI/GHCND Daily Summaries:
+    - TMAX[x-1], TMAX[x-2] para lags/MA.
+    - TMAX[x+1] para target oficial.
+
+- NCEI ISD-Lite / Global Hourly, estación LaGuardia:
+    - Temperatura horaria desde 00:00 hasta 23:00 del día X.
+    - HR, Td, SLP, viento y nubosidad cercanos a las 23:00.
+    - Precipitación acumulada desde 00:00 hasta 23:00.
+
+El objetivo es simular el momento real de ejecución del bot:
+día X a las 23:00 hora local de New York.
+"""
+
+from __future__ import annotations
+
+import gzip
+from io import StringIO
+from datetime import datetime
+
+import requests
+import pandas as pd
+import numpy as np
+
+
+# ---------------- CONFIG ----------------
+
+NCEI_DATA_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
+
+# Daily Summaries / GHCND
+LGA_GHCND_STATION = "USW00014732"  # LaGuardia Airport - GHCND
+
+# ISD-Lite / Global Hourly
+# Formato ISD: USAF-WBAN
+# LaGuardia suele usarse como 725030-14732.
+LGA_ISD_LITE_STATION = "725030-14732"
+ISD_LITE_BASE_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-lite"
+
+CITY_COORDS = {
+    "new york": {"lat": 40.7128, "lon": -74.0060, "tz": "America/New_York"},
+    "chicago":  {"lat": 41.8781, "lon": -87.6298, "tz": "America/Chicago"},
+    "atlanta":  {"lat": 33.7490, "lon": -84.3880, "tz": "America/New_York"},
+    "seul":     {"lat": 37.5665, "lon": 126.9780, "tz": "Asia/Seoul"},
+    "londres":  {"lat": 51.5074, "lon": -0.1278, "tz": "Europe/London"},
+}
+
+
+# ---------------- HELPERS GENERALES ----------------
+
+def _safe(v):
+    return None if (v is None or pd.isna(v)) else float(v)
+
+
+def _nearest_observation_at_or_before(
+    hourly: pd.DataFrame,
+    target_dt: pd.Timestamp,
+    tolerance_hours: int = 2,
+) -> pd.Series:
+    """
+    Busca la observación más cercana a una hora objetivo, sin usar futuro.
+
+    Ejemplo:
+    target_dt = 2025-07-10 23:00
+    Puede tomar 23:00, 22:00 o 21:00 si están dentro de la tolerancia.
+    """
+    if hourly.empty:
+        return pd.Series(dtype=float)
+
+    eligible = hourly[hourly["datetime_local"] <= target_dt].copy()
+
+    if eligible.empty:
+        return pd.Series(dtype=float)
+
+    eligible["diff_hours"] = (
+        target_dt - eligible["datetime_local"]
+    ).dt.total_seconds() / 3600.0
+
+    eligible = eligible[eligible["diff_hours"] <= tolerance_hours]
+
+    if eligible.empty:
+        return pd.Series(dtype=float)
+
+    return eligible.sort_values("diff_hours").iloc[0]
+
+
+def _rows_from_local_day_until(
+    hourly: pd.DataFrame,
+    day_ts: pd.Timestamp,
+    execution_dt: pd.Timestamp,
+) -> pd.DataFrame:
+    """
+    Devuelve observaciones del día local desde 00:00 hasta execution_dt.
+    """
+    start_day = day_ts.normalize()
+
+    return hourly[
+        (hourly["datetime_local"] >= start_day)
+        & (hourly["datetime_local"] <= execution_dt)
+    ].copy()
+
+
+def _precip_sum_until_execution(day_rows: pd.DataFrame) -> float:
+    """
+    Precipitación acumulada desde 00:00 hasta la hora de ejecución.
+
+    Preferencia:
+    1. Sumar precipitación 1h si hay suficientes observaciones.
+    2. Si no, usar precipitación 6h como fallback.
+    """
+    if day_rows.empty:
+        return np.nan
+
+    p1 = day_rows["Precip_1h"].dropna()
+
+    if len(p1) >= 6:
+        return float(p1.sum())
+
+    p6 = day_rows["Precip_6h"].dropna()
+
+    if len(p6) >= 1:
+        return float(p6.sum())
+
+    return np.nan
+
+
+# ---------------- HELPERS NCEI DAILY SUMMARIES / GHCND ----------------
+
+def _fetch_ncei_daily(
+    station: str,
+    start_date: str,
+    end_date: str,
+    data_types: list[str],
+) -> pd.DataFrame:
+    """
+    Descarga Daily Summaries de NCEI/GHCND.
+
+    Unidades con units=metric:
+    - TMAX/TMIN: °C
+    - PRCP: mm, si se solicita
+    """
+    params = {
+        "dataset": "daily-summaries",
+        "stations": station,
+        "startDate": start_date,
+        "endDate": end_date,
+        "dataTypes": ",".join(data_types),
+        "format": "json",
+        "units": "metric",
+        "includeStationName": "false",
+        "includeStationLocation": "false",
+        "includeAttributes": "false",
+    }
+
+    headers = {"User-Agent": "tmax-bot/1.0"}
+
+    r = requests.get(NCEI_DATA_URL, params=params, headers=headers, timeout=30)
+
+    if r.status_code != 200:
+        raise ConnectionError(
+            f"Error NCEI Daily Summaries: {r.status_code} - {r.text[:300]}"
+        )
+
+    rows = r.json()
+
+    if not rows:
+        return pd.DataFrame()
+
+    def _find_key(d: dict, candidates: list[str]) -> str | None:
+        keys = {k.lower(): k for k in d.keys()}
+
+        for c in candidates:
+            if c.lower() in keys:
+                return keys[c.lower()]
+
+        return None
+
+    date_key = _find_key(rows[0], ["DATE", "date"])
+
+    if not date_key:
+        raise ValueError(
+            f"NCEI: no encontré campo de fecha. Keys={list(rows[0].keys())}"
+        )
+
+    out = []
+
+    for row in rows:
+        rec = {"time": pd.to_datetime(row[date_key]).normalize()}
+
+        for dt in data_types:
+            val = None
+
+            for k in row.keys():
+                if k.upper() == dt.upper():
+                    val = row[k]
+                    break
+
+            if val in (None, "", "NaN"):
+                rec[dt.upper()] = np.nan
+            else:
+                try:
+                    rec[dt.upper()] = float(val)
+                except ValueError:
+                    rec[dt.upper()] = np.nan
+
+        out.append(rec)
+
+    df = (
+        pd.DataFrame(out)
+        .drop_duplicates(subset=["time"], keep="last")
+        .set_index("time")
+        .sort_index()
+    )
+
+    return df
+
+
+# ---------------- HELPERS ISD-LITE ----------------
+
+def _to_scaled_value(series: pd.Series, scale: float = 10.0) -> pd.Series:
+    """
+    ISD-Lite usa -9999 como missing.
+    Muchas variables vienen escaladas por 10.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    return s / scale
+
+
+def _to_unscaled_value(series: pd.Series) -> pd.Series:
+    """
+    Para variables sin escala decimal, como wind direction o sky condition.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    return s
+
+
+def _precip_scaled(series: pd.Series) -> pd.Series:
+    """
+    Precipitación ISD-Lite:
+    - -9999 = missing
+    - -1 = trace precipitation
+
+    Para ML diario, trace se toma como 0.0 mm.
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.replace(-9999, np.nan)
+    s = s.replace(-1, 0.0)
+    return s / 10.0
+
+
+def _sky_condition_to_cloud_pct(code: float) -> float:
+    """
+    Convierte sky condition code de ISD-Lite a porcentaje aproximado de nubosidad.
+
+    Códigos principales:
+    0-8 representan oktas.
+    9 y 10 se tratan como missing/indeterminado.
+    11-19 son variantes textuales; se aproximan a porcentajes.
+    """
+    if pd.isna(code):
+        return np.nan
+
+    code = int(code)
+
+    if 0 <= code <= 8:
+        return (code / 8.0) * 100.0
+
+    if code in [9, 10]:
+        return np.nan
+
+    if code in [11, 12, 13]:
+        return 37.5
+
+    if code in [14, 15, 16]:
+        return 75.0
+
+    if code in [17, 18, 19]:
+        return 100.0
+
+    return np.nan
+
+
+def _relative_humidity_from_temp_dewpoint(
+    temp_c: pd.Series,
+    dewpoint_c: pd.Series,
+) -> pd.Series:
+    """
+    Calcula humedad relativa aproximada usando temperatura y punto de rocío.
+
+    Fórmula Magnus:
+    RH = 100 * e(Td) / e(T)
+    """
+    temp_c = pd.to_numeric(temp_c, errors="coerce")
+    dewpoint_c = pd.to_numeric(dewpoint_c, errors="coerce")
+
+    a = 17.625
+    b = 243.04
+
+    es_td = np.exp((a * dewpoint_c) / (b + dewpoint_c))
+    es_t = np.exp((a * temp_c) / (b + temp_c))
+
+    rh = 100.0 * (es_td / es_t)
+    rh = rh.clip(lower=0.0, upper=100.0)
+
+    return rh
+
+
+def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
+    """
+    Descarga un año de ISD-Lite para una estación.
+
+    URL esperada:
+    https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/YYYY/STATION-YYYY.gz
+    """
+    url = f"{ISD_LITE_BASE_URL}/{year}/{station}-{year}.gz"
+
+    r = requests.get(url, timeout=40)
+
+    if r.status_code == 404:
+        return pd.DataFrame()
+
+    if r.status_code != 200:
+        raise ConnectionError(
+            f"Error ISD-Lite {year}: {r.status_code} - {r.text[:200]}"
+        )
+
+    try:
+        text = gzip.decompress(r.content).decode("utf-8", errors="replace")
+    except OSError:
+        text = r.content.decode("utf-8", errors="replace")
+
+    if not text.strip():
+        return pd.DataFrame()
+
+    cols = [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "air_temperature",
+        "dew_point_temperature",
+        "sea_level_pressure",
+        "wind_direction",
+        "wind_speed",
+        "sky_condition",
+        "precip_1h",
+        "precip_6h",
+    ]
+
+    df = pd.read_csv(
+        StringIO(text),
+        sep=r"\s+",
+        names=cols,
+        engine="python",
+    )
+
+    return df
+
+
+def _fetch_ncei_isd_lite_hourly(
+    station: str,
+    start_date: str,
+    end_date: str,
+    tz: str,
+) -> pd.DataFrame:
+    """
+    Descarga ISD-Lite horario y conserva observaciones por hora local.
+
+    Retorna filas horarias con:
+    - datetime_utc
+    - datetime_local
+    - time
+    - Temp_C
+    - HR
+    - Td
+    - SLP
+    - WindSpd
+    - WindDir
+    - Cloud
+    - Precip_1h
+    - Precip_6h
+    """
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize() + pd.Timedelta(
+        hours=23,
+        minutes=59,
+    )
+
+    frames = []
+
+    for year in range(start_ts.year, end_ts.year + 1):
+        yearly = _fetch_isd_lite_year(station=station, year=year)
+
+        if not yearly.empty:
+            frames.append(yearly)
+
+    if not frames:
+        return pd.DataFrame()
+
+    raw = pd.concat(frames, ignore_index=True)
+
+    raw["datetime_utc"] = pd.to_datetime(
+        dict(
+            year=raw["year"],
+            month=raw["month"],
+            day=raw["day"],
+            hour=raw["hour"],
+        ),
+        errors="coerce",
+        utc=True,
+    )
+
+    raw = raw.dropna(subset=["datetime_utc"]).copy()
+
+    raw["datetime_local"] = (
+        raw["datetime_utc"]
+        .dt.tz_convert(tz)
+        .dt.tz_localize(None)
+    )
+
+    raw["time"] = raw["datetime_local"].dt.normalize()
+
+    raw["Temp_C"] = _to_scaled_value(raw["air_temperature"], scale=10.0)
+    raw["Td"] = _to_scaled_value(raw["dew_point_temperature"], scale=10.0)
+    raw["SLP"] = _to_scaled_value(raw["sea_level_pressure"], scale=10.0)
+    raw["WindDir"] = _to_unscaled_value(raw["wind_direction"])
+    raw["WindSpd"] = _to_scaled_value(raw["wind_speed"], scale=10.0)
+    raw["Cloud"] = (
+        _to_unscaled_value(raw["sky_condition"])
+        .apply(_sky_condition_to_cloud_pct)
+    )
+
+    raw["Precip_1h"] = _precip_scaled(raw["precip_1h"])
+    raw["Precip_6h"] = _precip_scaled(raw["precip_6h"])
+
+    raw["HR"] = _relative_humidity_from_temp_dewpoint(
+        temp_c=raw["Temp_C"],
+        dewpoint_c=raw["Td"],
+    )
+
+    raw = raw[
+        (raw["datetime_local"] >= start_ts)
+        & (raw["datetime_local"] <= end_ts)
+    ].copy()
+
+    raw = raw.sort_values("datetime_local")
+
+    return raw
+
+
+# ---------------- MAIN ----------------
+
+def get_weather_features(
+    city: str,
+    date_str: str,
+    strict: bool = True,
+    execution_hour: int = 23,
+    nearest_tolerance_hours: int = 2,
+) -> dict:
+    """
+    Genera features usando únicamente información disponible hasta las 23:00
+    del día X, hora local de New York.
+
+    date_str:
+      formato esperado: "%d-%m-%y"
+
+    Target:
+      - t_max_x+1 sale de NCEI/GHCND Daily Summaries.
+
+    Features:
+      - Variables horarias vienen de ISD-Lite / sensores de LaGuardia.
+      - Tmax/Tmin/Tmean del día X se calculan desde 00:00 hasta 23:00.
+    """
+    city_key = city.lower().strip()
+
+    if city_key not in CITY_COORDS:
+        raise ValueError(f"Ciudad no soportada. Use: {list(CITY_COORDS.keys())}")
+
+    if city_key != "new york":
+        raise ValueError(
+            "Esta versión solo implementa fuentes NCEI/LaGuardia para New York."
+        )
+
+    target_date = datetime.strptime(date_str, "%d-%m-%y")
+
+    target_ts = pd.to_datetime(target_date.strftime("%Y-%m-%d")).normalize()
+    next_ts = target_ts + pd.Timedelta(days=1)
+
+    execution_dt = target_ts + pd.Timedelta(hours=execution_hour)
+    previous_execution_dt = execution_dt - pd.Timedelta(days=1)
+
+    # Daily Summaries:
+    # - x-2 y x-1 para lags/MA
+    # - x+1 para target
+    daily_start = target_ts - pd.Timedelta(days=2)
+    daily_end = next_ts
+
+    daily_idx = pd.date_range(daily_start, daily_end, freq="D")
+
+    ncei_daily = _fetch_ncei_daily(
+        station=LGA_GHCND_STATION,
+        start_date=daily_start.strftime("%Y-%m-%d"),
+        end_date=daily_end.strftime("%Y-%m-%d"),
+        data_types=["TMAX", "TMIN"],
+    ).reindex(daily_idx)
+
+    # ISD-Lite horario:
+    # - x-1 para presión 23h del día anterior
+    # - x para features as-of 23h
+    hourly_start = target_ts - pd.Timedelta(days=1)
+    hourly_end = target_ts
+
+    hourly = _fetch_ncei_isd_lite_hourly(
+        station=LGA_ISD_LITE_STATION,
+        start_date=hourly_start.strftime("%Y-%m-%d"),
+        end_date=hourly_end.strftime("%Y-%m-%d"),
+        tz=CITY_COORDS[city_key]["tz"],
+    )
+
+    if hourly.empty:
+        if strict:
+            print("Error: ISD-Lite no devolvió observaciones horarias.")
+            return {}
+
+    day_rows = _rows_from_local_day_until(
+        hourly=hourly,
+        day_ts=target_ts,
+        execution_dt=execution_dt,
+    )
+
+    if day_rows.empty and strict:
+        print(
+            f"Error: no hay observaciones para {target_ts.date()} "
+            f"hasta {execution_hour}:00."
+        )
+        return {}
+
+    obs_23 = _nearest_observation_at_or_before(
+        hourly=hourly,
+        target_dt=execution_dt,
+        tolerance_hours=nearest_tolerance_hours,
+    )
+
+    obs_prev_23 = _nearest_observation_at_or_before(
+        hourly=hourly,
+        target_dt=previous_execution_dt,
+        tolerance_hours=nearest_tolerance_hours,
+    )
+
+    # ---------------- FEATURES TÉRMICAS AS-OF 23H ----------------
+
+    tmax_so_far_23h_x = day_rows["Temp_C"].max()
+    tmin_so_far_23h_x = day_rows["Temp_C"].min()
+    tmean_so_far_23h_x = day_rows["Temp_C"].mean()
+
+    tmax_x_minus_1 = ncei_daily.loc[target_ts - pd.Timedelta(days=1), "TMAX"]
+    tmax_x_minus_2 = ncei_daily.loc[target_ts - pd.Timedelta(days=2), "TMAX"]
+
+    delta_tmax_so_far_1d_23h = (
+        tmax_so_far_23h_x - tmax_x_minus_1
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(tmax_x_minus_1)
+        else np.nan
+    )
+
+    ma_tmax_3d_asof_23h = (
+        (tmax_so_far_23h_x + tmax_x_minus_1 + tmax_x_minus_2) / 3.0
+        if pd.notna(tmax_so_far_23h_x)
+        and pd.notna(tmax_x_minus_1)
+        and pd.notna(tmax_x_minus_2)
+        else np.nan
+    )
+
+    dtr_so_far_23h_x = (
+        tmax_so_far_23h_x - tmin_so_far_23h_x
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(tmin_so_far_23h_x)
+        else np.nan
+    )
+
+    # ---------------- FEATURES 23H ----------------
+
+    hr_23h_x = obs_23.get("HR", np.nan)
+    td_23h_x = obs_23.get("Td", np.nan)
+    slp_23h_x = obs_23.get("SLP", np.nan)
+    wind_spd_23h_x = obs_23.get("WindSpd", np.nan)
+    wind_dir_23h_x = obs_23.get("WindDir", np.nan)
+    cloud_23h_x = obs_23.get("Cloud", np.nan)
+
+    slp_23h_x_minus_1 = obs_prev_23.get("SLP", np.nan)
+
+    delta_slp_24h_23h = (
+        slp_23h_x - slp_23h_x_minus_1
+        if pd.notna(slp_23h_x) and pd.notna(slp_23h_x_minus_1)
+        else np.nan
+    )
+
+    wind_rad = np.deg2rad(wind_dir_23h_x) if pd.notna(wind_dir_23h_x) else np.nan
+    wind_dir_sin_23h_x = np.sin(wind_rad) if pd.notna(wind_rad) else np.nan
+    wind_dir_cos_23h_x = np.cos(wind_rad) if pd.notna(wind_rad) else np.nan
+
+    precip_sum_00_23h_x = _precip_sum_until_execution(day_rows)
+
+    # ---------------- ESTACIONALIDAD ----------------
+
+    doy = target_ts.dayofyear
+    doy_sin = np.sin(2 * np.pi * doy / 365.25)
+    doy_cos = np.cos(2 * np.pi * doy / 365.25)
+
+    # ---------------- TARGET ----------------
+
+    target_x_plus_1 = ncei_daily.loc[next_ts, "TMAX"]
+
+    features = {
+        # Térmicas as-of 23h
+        "Tmax_so_far_23h_x": _safe(tmax_so_far_23h_x),
+        "Tmin_so_far_23h_x": _safe(tmin_so_far_23h_x),
+        "Tmean_so_far_23h_x": _safe(tmean_so_far_23h_x),
+        "Delta_Tmax_so_far_1d_23h": _safe(delta_tmax_so_far_1d_23h),
+        "MA_Tmax_3d_asof_23h": _safe(ma_tmax_3d_asof_23h),
+        "DTR_so_far_23h_x": _safe(dtr_so_far_23h_x),
+
+        # Variables de sensores de LaGuardia cercanas a 23h
+        "HR_23h_x": _safe(hr_23h_x),
+        "Td_23h_x": _safe(td_23h_x),
+        "SLP_23h_x": _safe(slp_23h_x),
+        "Delta_SLP_24h_23h": _safe(delta_slp_24h_23h),
+        "WindSpd_23h_x": _safe(wind_spd_23h_x),
+        "WindDir_sin_23h_x": _safe(wind_dir_sin_23h_x),
+        "WindDir_cos_23h_x": _safe(wind_dir_cos_23h_x),
+        "Cloud_23h_x": _safe(cloud_23h_x),
+
+        # Acumulada desde 00:00 hasta 23h
+        "Precip_sum_00_23h_x": _safe(precip_sum_00_23h_x),
+
+        # Target oficial
+        "t_max_x+1": _safe(target_x_plus_1),
+
+        # Metadata / estacionalidad
+        "ciudad": city,
+        "doy_sin": _safe(doy_sin),
+        "doy_cos": _safe(doy_cos),
+    }
+
+    if strict:
+        allowed_non_numeric = {"ciudad"}
+
+        missing_features = [
+            k for k, v in features.items()
+            if k not in allowed_non_numeric and v is None
+        ]
+
+        if missing_features:
+            print("Error: faltan features necesarias para construir la fila as-of 23:00.")
+            for k in missing_features[:40]:
+                print(" -", k)
+
+            if len(missing_features) > 40:
+                print(f" - ... y {len(missing_features) - 40} más")
+
+            return {}
+
+    return features
+```
+
+</details>
+
+<details>
+<summary><strong>Adicion de nuevas features</strong></summary>
+
+Se propone agregar las siguientes features
 
 
 | Rank | Feature propuesta                         | Posibilidad de mejora | Idea                                                                                                                     |
@@ -1255,9 +2632,8 @@ Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
 |   20 | `extreme_heat_flag` / `extreme_cold_flag` | Media                 | Flag si el día actual está sobre percentil 90 o bajo percentil 10 histórico para ese DOY.                                |
 
 
+
 </details>
-
-
 
 
 
