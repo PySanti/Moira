@@ -1,34 +1,30 @@
 """
-Consulta APIs climáticas para construir features as-of 23h del día X.
+build_climate_data.py
 
-Versión:
-- Mantiene features base as-of 23h.
-- Agrega únicamente nuevas features NO-FORECAST:
-    - climatology_tmax_doy
-    - tmax_anomaly_x
-    - tmax_lag2 / tmax_lag3 / tmax_lag7
-    - tmin_lag1
-    - tmean_ma7
-    - tmax_trend_3d / tmax_trend_7d
-    - dtr_ma3
-    - td_anomaly_x
-    - td_ma3
-    - wind_u / wind_v
-    - pressure_trend_3d
-    - month / season
-    - extreme_heat_flag / extreme_cold_flag
+Versión optimizada con cache para construir features as-of 23h del día X.
 
-No incluye:
-- forecast_tmax_x+1
-- forecast_error_tmax_lag1
-- forecast_error_tmax_ma3
-- forecast_anomaly_x+1
+Cambios principales:
+- Cache por año para NCEI/GHCND Daily Summaries.
+- Cache por año para ISD-Lite ya procesado/escalado.
+- Cache por año para tabla diaria 23h de ISD-Lite.
+- Cache persistente opcional en disco para evitar redescargar/reprocesar entre ejecuciones.
+- td_anomaly_x ya no reconstruye todo el histórico horario en cada llamada.
+
+Uso:
+    from build_climate_data import get_weather_features, preload_weather_cache
+
+    preload_weather_cache("new york", "1980-01-01", "2025-12-31")
+    row = get_weather_features("new york", "10-05-24", strict=True)
 """
 
 from __future__ import annotations
 
 import gzip
+import hashlib
+import os
+import re
 from io import StringIO
+from pathlib import Path
 from datetime import datetime
 
 import requests
@@ -45,7 +41,6 @@ LGA_GHCND_STATION = "USW00014732"  # LaGuardia Airport - GHCND
 
 # ISD-Lite / Global Hourly
 # Formato ISD: USAF-WBAN
-# LaGuardia suele usarse como 725030-14732.
 LGA_ISD_LITE_STATION = "725030-14732"
 ISD_LITE_BASE_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-lite"
 
@@ -59,11 +54,94 @@ CITY_COORDS = {
 
 DEFAULT_HISTORY_START_DATE = "1980-01-01"
 
+# Cache persistente.
+# Puedes cambiar la carpeta con:
+#   WEATHER_CACHE_DIR=/ruta/cache python test.py
+CACHE_DIR = Path(os.getenv("WEATHER_CACHE_DIR", ".weather_cache"))
+ENABLE_DISK_CACHE = os.getenv("WEATHER_DISABLE_DISK_CACHE", "0").strip() not in {"1", "true", "TRUE", "yes", "YES"}
 
-# ---------------- CACHES ----------------
 
-_NCEI_DAILY_CACHE: dict[tuple, pd.DataFrame] = {}
-_ISD_LITE_YEAR_CACHE: dict[tuple[str, int], pd.DataFrame] = {}
+# ---------------- CACHES EN MEMORIA ----------------
+
+_NCEI_DAILY_YEAR_CACHE: dict[tuple, pd.DataFrame] = {}
+_ISD_LITE_RAW_YEAR_CACHE: dict[tuple[str, int], pd.DataFrame] = {}
+_ISD_LITE_PROCESSED_YEAR_CACHE: dict[tuple[str, int, str], pd.DataFrame] = {}
+_ISD_DAILY_23H_YEAR_CACHE: dict[tuple[str, int, str, int, int], pd.DataFrame] = {}
+
+
+# ---------------- HELPERS CACHE DISCO ----------------
+
+def _safe_key_part(value: object) -> str:
+    s = str(value)
+    s = re.sub(r"[^a-zA-Z0-9_.-]+", "_", s)
+    return s[:80]
+
+
+def _disk_cache_path(prefix: str, key: tuple) -> Path:
+    raw = repr(key).encode("utf-8")
+    digest = hashlib.sha256(raw).hexdigest()[:20]
+    return CACHE_DIR / prefix / f"{digest}.pkl"
+
+
+def _read_df_from_disk_cache(prefix: str, key: tuple) -> pd.DataFrame | None:
+    if not ENABLE_DISK_CACHE:
+        return None
+
+    path = _disk_cache_path(prefix, key)
+
+    if not path.exists():
+        return None
+
+    try:
+        return pd.read_pickle(path)
+    except Exception:
+        # Si el cache quedó corrupto, se ignora y se reconstruye.
+        return None
+
+
+def _write_df_to_disk_cache(prefix: str, key: tuple, df: pd.DataFrame) -> None:
+    if not ENABLE_DISK_CACHE:
+        return
+
+    path = _disk_cache_path(prefix, key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = path.with_suffix(".tmp.pkl")
+
+    try:
+        df.to_pickle(tmp_path)
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+
+
+def clear_memory_cache() -> None:
+    """
+    Limpia únicamente el cache en memoria.
+    No borra el cache persistente en disco.
+    """
+    _NCEI_DAILY_YEAR_CACHE.clear()
+    _ISD_LITE_RAW_YEAR_CACHE.clear()
+    _ISD_LITE_PROCESSED_YEAR_CACHE.clear()
+    _ISD_DAILY_23H_YEAR_CACHE.clear()
+
+
+def cache_info() -> dict:
+    """
+    Devuelve conteos rápidos de cache para debugging.
+    """
+    return {
+        "ncei_daily_year_cache": len(_NCEI_DAILY_YEAR_CACHE),
+        "isd_lite_raw_year_cache": len(_ISD_LITE_RAW_YEAR_CACHE),
+        "isd_lite_processed_year_cache": len(_ISD_LITE_PROCESSED_YEAR_CACHE),
+        "isd_daily_23h_year_cache": len(_ISD_DAILY_23H_YEAR_CACHE),
+        "disk_cache_enabled": ENABLE_DISK_CACHE,
+        "disk_cache_dir": str(CACHE_DIR),
+    }
 
 
 # ---------------- HELPERS GENERALES ----------------
@@ -167,38 +245,6 @@ def _climatology_stats(
     }
 
 
-def _nearest_observation_at_or_before(
-    hourly: pd.DataFrame,
-    target_dt: pd.Timestamp,
-    tolerance_hours: int = 2,
-) -> pd.Series:
-    """
-    Busca la observación más cercana a una hora objetivo, sin usar futuro.
-
-    Ejemplo:
-    target_dt = 2025-07-10 23:00
-    Puede tomar 23:00, 22:00 o 21:00 si están dentro de la tolerancia.
-    """
-    if hourly.empty:
-        return pd.Series(dtype=float)
-
-    eligible = hourly[hourly["datetime_local"] <= target_dt].copy()
-
-    if eligible.empty:
-        return pd.Series(dtype=float)
-
-    eligible["diff_hours"] = (
-        target_dt - eligible["datetime_local"]
-    ).dt.total_seconds() / 3600.0
-
-    eligible = eligible[eligible["diff_hours"] <= tolerance_hours]
-
-    if eligible.empty:
-        return pd.Series(dtype=float)
-
-    return eligible.sort_values("diff_hours").iloc[0]
-
-
 def _rows_from_local_day_until(
     hourly: pd.DataFrame,
     day_ts: pd.Timestamp,
@@ -241,35 +287,47 @@ def _precip_sum_until_execution(day_rows: pd.DataFrame) -> float:
 
 # ---------------- HELPERS NCEI DAILY SUMMARIES / GHCND ----------------
 
-def _fetch_ncei_daily(
+def _fetch_ncei_daily_year(
     station: str,
-    start_date: str,
-    end_date: str,
+    year: int,
     data_types: list[str],
 ) -> pd.DataFrame:
     """
-    Descarga Daily Summaries de NCEI/GHCND.
+    Descarga y cachea un año de Daily Summaries de NCEI/GHCND.
 
-    Unidades con units=metric:
-    - TMAX/TMIN: °C
-    - PRCP: mm, si se solicita.
+    Este cache por año evita que cada llamada a get_weather_features vuelva a
+    descargar rangos históricos enormes con keys diferentes.
     """
-    cache_key = (
-        station,
-        start_date,
-        end_date,
-        tuple(sorted([dt.upper() for dt in data_types])),
-    )
+    normalized_types = tuple(sorted([dt.upper() for dt in data_types]))
+    cache_key = (station, int(year), normalized_types)
 
-    if cache_key in _NCEI_DAILY_CACHE:
-        return _NCEI_DAILY_CACHE[cache_key].copy()
+    if cache_key in _NCEI_DAILY_YEAR_CACHE:
+        return _NCEI_DAILY_YEAR_CACHE[cache_key].copy()
+
+    disk_df = _read_df_from_disk_cache("ncei_daily_year", cache_key)
+    if disk_df is not None:
+        _NCEI_DAILY_YEAR_CACHE[cache_key] = disk_df.copy()
+        return disk_df.copy()
+
+    start_date = f"{year}-01-01"
+
+    # Evita pedir datos demasiado futuros en el año actual.
+    today = pd.Timestamp.today().normalize()
+    year_end = pd.Timestamp(year=year, month=12, day=31)
+
+    if year_end > today and year >= today.year:
+        end_ts = today
+    else:
+        end_ts = year_end
+
+    end_date = end_ts.strftime("%Y-%m-%d")
 
     params = {
         "dataset": "daily-summaries",
         "stations": station,
         "startDate": start_date,
         "endDate": end_date,
-        "dataTypes": ",".join(data_types),
+        "dataTypes": ",".join(normalized_types),
         "format": "json",
         "units": "metric",
         "includeStationName": "false",
@@ -283,13 +341,17 @@ def _fetch_ncei_daily(
 
     if r.status_code != 200:
         raise ConnectionError(
-            f"Error NCEI Daily Summaries: {r.status_code} - {r.text[:300]}"
+            f"Error NCEI Daily Summaries {year}: {r.status_code} - {r.text[:300]}"
         )
 
     rows = r.json()
 
     if not rows:
-        return pd.DataFrame()
+        df_empty = pd.DataFrame(columns=list(normalized_types))
+        df_empty.index = pd.DatetimeIndex([], name="time")
+        _NCEI_DAILY_YEAR_CACHE[cache_key] = df_empty.copy()
+        _write_df_to_disk_cache("ncei_daily_year", cache_key, df_empty)
+        return df_empty.copy()
 
     def _find_key(d: dict, candidates: list[str]) -> str | None:
         keys = {k.lower(): k for k in d.keys()}
@@ -312,7 +374,7 @@ def _fetch_ncei_daily(
     for row in rows:
         rec = {"time": pd.to_datetime(row[date_key]).normalize()}
 
-        for dt in data_types:
+        for dt in normalized_types:
             val = None
 
             for k in row.keys():
@@ -321,12 +383,12 @@ def _fetch_ncei_daily(
                     break
 
             if val in (None, "", "NaN"):
-                rec[dt.upper()] = np.nan
+                rec[dt] = np.nan
             else:
                 try:
-                    rec[dt.upper()] = float(val)
+                    rec[dt] = float(val)
                 except ValueError:
-                    rec[dt.upper()] = np.nan
+                    rec[dt] = np.nan
 
         out.append(rec)
 
@@ -337,9 +399,65 @@ def _fetch_ncei_daily(
         .sort_index()
     )
 
-    _NCEI_DAILY_CACHE[cache_key] = df.copy()
+    for dt in normalized_types:
+        if dt not in df.columns:
+            df[dt] = np.nan
+
+    _NCEI_DAILY_YEAR_CACHE[cache_key] = df.copy()
+    _write_df_to_disk_cache("ncei_daily_year", cache_key, df)
+
+    return df.copy()
+
+
+def _fetch_ncei_daily_cached(
+    station: str,
+    start_date: str,
+    end_date: str,
+    data_types: list[str],
+) -> pd.DataFrame:
+    """
+    Retorna Daily Summaries para [start_date, end_date] usando cache por año.
+    """
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize()
+
+    frames = []
+
+    for year in range(start_ts.year, end_ts.year + 1):
+        df_year = _fetch_ncei_daily_year(
+            station=station,
+            year=year,
+            data_types=data_types,
+        )
+
+        if not df_year.empty:
+            frames.append(df_year)
+
+    if not frames:
+        df_empty = pd.DataFrame(columns=[dt.upper() for dt in data_types])
+        df_empty.index = pd.DatetimeIndex([], name="time")
+        return df_empty
+
+    df = pd.concat(frames, axis=0)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df[(df.index >= start_ts) & (df.index <= end_ts)].copy()
 
     return df
+
+
+# Compatibilidad con versiones anteriores.
+def _fetch_ncei_daily(
+    station: str,
+    start_date: str,
+    end_date: str,
+    data_types: list[str],
+) -> pd.DataFrame:
+    return _fetch_ncei_daily_cached(
+        station=station,
+        start_date=start_date,
+        end_date=end_date,
+        data_types=data_types,
+    )
 
 
 # ---------------- HELPERS ISD-LITE ----------------
@@ -434,17 +552,19 @@ def _relative_humidity_from_temp_dewpoint(
     return rh
 
 
-def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
+def _fetch_isd_lite_year_raw(station: str, year: int) -> pd.DataFrame:
     """
-    Descarga un año de ISD-Lite para una estación.
-
-    URL esperada:
-    https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/YYYY/STATION-YYYY.gz
+    Descarga un año crudo de ISD-Lite para una estación.
     """
-    cache_key = (station, year)
+    cache_key = (station, int(year))
 
-    if cache_key in _ISD_LITE_YEAR_CACHE:
-        return _ISD_LITE_YEAR_CACHE[cache_key].copy()
+    if cache_key in _ISD_LITE_RAW_YEAR_CACHE:
+        return _ISD_LITE_RAW_YEAR_CACHE[cache_key].copy()
+
+    disk_df = _read_df_from_disk_cache("isd_lite_raw_year", cache_key)
+    if disk_df is not None:
+        _ISD_LITE_RAW_YEAR_CACHE[cache_key] = disk_df.copy()
+        return disk_df.copy()
 
     url = f"{ISD_LITE_BASE_URL}/{year}/{station}-{year}.gz"
 
@@ -452,7 +572,8 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
 
     if r.status_code == 404:
         df_empty = pd.DataFrame()
-        _ISD_LITE_YEAR_CACHE[cache_key] = df_empty
+        _ISD_LITE_RAW_YEAR_CACHE[cache_key] = df_empty.copy()
+        _write_df_to_disk_cache("isd_lite_raw_year", cache_key, df_empty)
         return df_empty.copy()
 
     if r.status_code != 200:
@@ -467,7 +588,8 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
 
     if not text.strip():
         df_empty = pd.DataFrame()
-        _ISD_LITE_YEAR_CACHE[cache_key] = df_empty
+        _ISD_LITE_RAW_YEAR_CACHE[cache_key] = df_empty.copy()
+        _write_df_to_disk_cache("isd_lite_raw_year", cache_key, df_empty)
         return df_empty.copy()
 
     cols = [
@@ -492,52 +614,48 @@ def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
         engine="python",
     )
 
-    _ISD_LITE_YEAR_CACHE[cache_key] = df.copy()
+    _ISD_LITE_RAW_YEAR_CACHE[cache_key] = df.copy()
+    _write_df_to_disk_cache("isd_lite_raw_year", cache_key, df)
 
-    return df
+    return df.copy()
 
 
-def _fetch_ncei_isd_lite_hourly(
+# Compatibilidad con versiones anteriores.
+def _fetch_isd_lite_year(station: str, year: int) -> pd.DataFrame:
+    return _fetch_isd_lite_year_raw(station=station, year=year)
+
+
+def _fetch_isd_lite_year_processed(
     station: str,
-    start_date: str,
-    end_date: str,
+    year: int,
     tz: str,
 ) -> pd.DataFrame:
     """
-    Descarga ISD-Lite horario y conserva observaciones por hora local.
+    Descarga, convierte y cachea un año de ISD-Lite ya procesado.
 
-    Retorna filas horarias con:
-    - datetime_utc
-    - datetime_local
-    - time
-    - Temp_C
-    - HR
-    - Td
-    - SLP
-    - WindSpd
-    - WindDir
-    - Cloud
-    - Precip_1h
-    - Precip_6h
+    En la versión anterior, cada llamada volvía a convertir columnas,
+    escalar unidades, calcular humedad relativa y filtrar fechas.
+    Esta versión lo hace una sola vez por año.
     """
-    start_ts = pd.to_datetime(start_date).normalize()
-    end_ts = pd.to_datetime(end_date).normalize() + pd.Timedelta(
-        hours=23,
-        minutes=59,
-    )
+    cache_key = (station, int(year), tz)
 
-    frames = []
+    if cache_key in _ISD_LITE_PROCESSED_YEAR_CACHE:
+        return _ISD_LITE_PROCESSED_YEAR_CACHE[cache_key].copy()
 
-    for year in range(start_ts.year, end_ts.year + 1):
-        yearly = _fetch_isd_lite_year(station=station, year=year)
+    disk_df = _read_df_from_disk_cache("isd_lite_processed_year", cache_key)
+    if disk_df is not None:
+        _ISD_LITE_PROCESSED_YEAR_CACHE[cache_key] = disk_df.copy()
+        return disk_df.copy()
 
-        if not yearly.empty:
-            frames.append(yearly)
+    raw = _fetch_isd_lite_year_raw(station=station, year=year)
 
-    if not frames:
-        return pd.DataFrame()
+    if raw.empty:
+        df_empty = pd.DataFrame()
+        _ISD_LITE_PROCESSED_YEAR_CACHE[cache_key] = df_empty.copy()
+        _write_df_to_disk_cache("isd_lite_processed_year", cache_key, df_empty)
+        return df_empty.copy()
 
-    raw = pd.concat(frames, ignore_index=True)
+    raw = raw.copy()
 
     raw["datetime_utc"] = pd.to_datetime(
         dict(
@@ -578,14 +696,77 @@ def _fetch_ncei_isd_lite_hourly(
         dewpoint_c=raw["Td"],
     )
 
-    raw = raw[
-        (raw["datetime_local"] >= start_ts)
-        & (raw["datetime_local"] <= end_ts)
+    keep_cols = [
+        "datetime_utc",
+        "datetime_local",
+        "time",
+        "Temp_C",
+        "HR",
+        "Td",
+        "SLP",
+        "WindSpd",
+        "WindDir",
+        "Cloud",
+        "Precip_1h",
+        "Precip_6h",
+    ]
+
+    df = raw[keep_cols].sort_values("datetime_local").reset_index(drop=True)
+
+    _ISD_LITE_PROCESSED_YEAR_CACHE[cache_key] = df.copy()
+    _write_df_to_disk_cache("isd_lite_processed_year", cache_key, df)
+
+    return df.copy()
+
+
+def _fetch_ncei_isd_lite_hourly(
+    station: str,
+    start_date: str,
+    end_date: str,
+    tz: str,
+) -> pd.DataFrame:
+    """
+    Retorna observaciones horarias locales en [start_date 00:00, end_date 23:59].
+
+    Optimización:
+    - Usa cache por año ya procesado.
+    - Incluye buffer de años alrededor del rango local para no perder horas por
+      conversión UTC -> America/New_York cerca de Año Nuevo.
+    """
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize() + pd.Timedelta(
+        hours=23,
+        minutes=59,
+    )
+
+    # Buffer para cubrir conversiones UTC/local alrededor del cambio de año.
+    first_year = (start_ts - pd.Timedelta(days=2)).year
+    last_year = (end_ts + pd.Timedelta(days=2)).year
+
+    frames = []
+
+    for year in range(first_year, last_year + 1):
+        df_year = _fetch_isd_lite_year_processed(
+            station=station,
+            year=year,
+            tz=tz,
+        )
+
+        if not df_year.empty:
+            frames.append(df_year)
+
+    if not frames:
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df[
+        (df["datetime_local"] >= start_ts)
+        & (df["datetime_local"] <= end_ts)
     ].copy()
 
-    raw = raw.sort_values("datetime_local")
+    df = df.sort_values("datetime_local").reset_index(drop=True)
 
-    return raw
+    return df
 
 
 def _build_23h_daily_from_hourly(
@@ -597,41 +778,237 @@ def _build_23h_daily_from_hourly(
     """
     Construye una tabla diaria tomando la observación más cercana a execution_hour,
     sin usar observaciones futuras.
+
+    Implementación vectorizada con merge_asof.
+    Evita hacer un filtro completo del dataframe horario por cada día.
     """
-    rows = []
+    output_cols = [
+        "HR_23h",
+        "Td_23h",
+        "SLP_23h",
+        "WindSpd_23h",
+        "WindDir_23h",
+        "Cloud_23h",
+    ]
 
-    for day_ts in days:
-        day_ts = pd.to_datetime(day_ts).normalize()
-        target_dt = day_ts + pd.Timedelta(hours=execution_hour)
+    days = pd.DatetimeIndex(pd.to_datetime(days).normalize()).sort_values()
 
-        obs = _nearest_observation_at_or_before(
-            hourly=hourly,
-            target_dt=target_dt,
+    if len(days) == 0:
+        df_empty = pd.DataFrame(columns=output_cols)
+        df_empty.index = pd.DatetimeIndex([], name="time")
+        return df_empty
+
+    targets = pd.DataFrame({
+        "time": days,
+        "target_dt": days + pd.Timedelta(hours=execution_hour),
+    }).sort_values("target_dt")
+
+    if hourly.empty:
+        out = targets[["time"]].copy()
+        for col in output_cols:
+            out[col] = np.nan
+        return out.set_index("time").sort_index()
+
+    obs_cols = [
+        "datetime_local",
+        "HR",
+        "Td",
+        "SLP",
+        "WindSpd",
+        "WindDir",
+        "Cloud",
+    ]
+
+    obs = (
+        hourly[obs_cols]
+        .dropna(subset=["datetime_local"])
+        .sort_values("datetime_local")
+        .copy()
+    )
+
+    if obs.empty:
+        out = targets[["time"]].copy()
+        for col in output_cols:
+            out[col] = np.nan
+        return out.set_index("time").sort_index()
+
+    merged = pd.merge_asof(
+        targets,
+        obs,
+        left_on="target_dt",
+        right_on="datetime_local",
+        direction="backward",
+        tolerance=pd.Timedelta(hours=tolerance_hours),
+    )
+
+    out = pd.DataFrame({
+        "time": merged["time"],
+        "HR_23h": merged["HR"],
+        "Td_23h": merged["Td"],
+        "SLP_23h": merged["SLP"],
+        "WindSpd_23h": merged["WindSpd"],
+        "WindDir_23h": merged["WindDir"],
+        "Cloud_23h": merged["Cloud"],
+    })
+
+    return out.set_index("time").sort_index()
+
+
+def _fetch_isd_daily_23h_year(
+    station: str,
+    year: int,
+    tz: str,
+    execution_hour: int,
+    tolerance_hours: int,
+) -> pd.DataFrame:
+    """
+    Construye y cachea la tabla diaria 23h de un año local.
+
+    Esto es clave para td_anomaly_x:
+    antes se reconstruía todo el histórico 1980->X en cada llamada.
+    ahora se calcula una vez por año y se reutiliza.
+    """
+    cache_key = (station, int(year), tz, int(execution_hour), int(tolerance_hours))
+
+    if cache_key in _ISD_DAILY_23H_YEAR_CACHE:
+        return _ISD_DAILY_23H_YEAR_CACHE[cache_key].copy()
+
+    disk_df = _read_df_from_disk_cache("isd_daily_23h_year", cache_key)
+    if disk_df is not None:
+        _ISD_DAILY_23H_YEAR_CACHE[cache_key] = disk_df.copy()
+        return disk_df.copy()
+
+    start_date = f"{year}-01-01"
+    end_date = f"{year}-12-31"
+
+    hourly = _fetch_ncei_isd_lite_hourly(
+        station=station,
+        start_date=start_date,
+        end_date=end_date,
+        tz=tz,
+    )
+
+    days = pd.date_range(start_date, end_date, freq="D")
+
+    df = _build_23h_daily_from_hourly(
+        hourly=hourly,
+        days=days,
+        execution_hour=execution_hour,
+        tolerance_hours=tolerance_hours,
+    )
+
+    _ISD_DAILY_23H_YEAR_CACHE[cache_key] = df.copy()
+    _write_df_to_disk_cache("isd_daily_23h_year", cache_key, df)
+
+    return df.copy()
+
+
+def _fetch_isd_daily_23h_cached(
+    station: str,
+    start_date: str,
+    end_date: str,
+    tz: str,
+    execution_hour: int,
+    tolerance_hours: int,
+) -> pd.DataFrame:
+    """
+    Retorna tabla diaria 23h en [start_date, end_date] usando cache por año.
+    """
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize()
+
+    frames = []
+
+    for year in range(start_ts.year, end_ts.year + 1):
+        df_year = _fetch_isd_daily_23h_year(
+            station=station,
+            year=year,
+            tz=tz,
+            execution_hour=execution_hour,
             tolerance_hours=tolerance_hours,
         )
 
-        if obs.empty:
-            rows.append({
-                "time": day_ts,
-                "HR_23h": np.nan,
-                "Td_23h": np.nan,
-                "SLP_23h": np.nan,
-                "WindSpd_23h": np.nan,
-                "WindDir_23h": np.nan,
-                "Cloud_23h": np.nan,
-            })
-        else:
-            rows.append({
-                "time": day_ts,
-                "HR_23h": obs.get("HR", np.nan),
-                "Td_23h": obs.get("Td", np.nan),
-                "SLP_23h": obs.get("SLP", np.nan),
-                "WindSpd_23h": obs.get("WindSpd", np.nan),
-                "WindDir_23h": obs.get("WindDir", np.nan),
-                "Cloud_23h": obs.get("Cloud", np.nan),
-            })
+        if not df_year.empty:
+            frames.append(df_year)
 
-    return pd.DataFrame(rows).set_index("time").sort_index()
+    if not frames:
+        df_empty = pd.DataFrame(
+            columns=[
+                "HR_23h",
+                "Td_23h",
+                "SLP_23h",
+                "WindSpd_23h",
+                "WindDir_23h",
+                "Cloud_23h",
+            ]
+        )
+        df_empty.index = pd.DatetimeIndex([], name="time")
+        return df_empty
+
+    df = pd.concat(frames, axis=0)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df[(df.index >= start_ts) & (df.index <= end_ts)].copy()
+
+    return df
+
+
+# ---------------- PRELOAD OPCIONAL ----------------
+
+def preload_weather_cache(
+    city: str = "new york",
+    start_date: str = DEFAULT_HISTORY_START_DATE,
+    end_date: str = "2025-12-31",
+    execution_hour: int = 23,
+    nearest_tolerance_hours: int = 2,
+    include_td_daily_cache: bool = True,
+) -> dict:
+    """
+    Pre-carga caches útiles para minar dataset histórico.
+
+    Recomendado antes de loops largos:
+        preload_weather_cache("new york", "1980-01-01", "2025-12-31")
+
+    Esto no cambia el resultado de get_weather_features; solo evita que la primera
+    llamada tenga que construir todo el cache bajo demanda.
+    """
+    city_key = city.lower().strip()
+
+    if city_key != "new york":
+        raise ValueError("Esta versión solo implementa fuentes NCEI/LaGuardia para New York.")
+
+    tz = CITY_COORDS[city_key]["tz"]
+
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize()
+
+    # Daily Summaries para climatología, lags y target.
+    _fetch_ncei_daily_cached(
+        station=LGA_GHCND_STATION,
+        start_date=start_ts.strftime("%Y-%m-%d"),
+        end_date=end_ts.strftime("%Y-%m-%d"),
+        data_types=["TMAX", "TMIN"],
+    )
+
+    # ISD-Lite procesado por año.
+    _fetch_ncei_isd_lite_hourly(
+        station=LGA_ISD_LITE_STATION,
+        start_date=start_ts.strftime("%Y-%m-%d"),
+        end_date=end_ts.strftime("%Y-%m-%d"),
+        tz=tz,
+    )
+
+    # Tabla diaria 23h para td_anomaly_x.
+    if include_td_daily_cache:
+        _fetch_isd_daily_23h_cached(
+            station=LGA_ISD_LITE_STATION,
+            start_date=start_ts.strftime("%Y-%m-%d"),
+            end_date=end_ts.strftime("%Y-%m-%d"),
+            tz=tz,
+            execution_hour=execution_hour,
+            tolerance_hours=nearest_tolerance_hours,
+        )
+
+    return cache_info()
 
 
 # ---------------- MAIN ----------------
@@ -690,7 +1067,7 @@ def get_weather_features(
 
     daily_idx = pd.date_range(daily_start, daily_end, freq="D")
 
-    ncei_daily = _fetch_ncei_daily(
+    ncei_daily = _fetch_ncei_daily_cached(
         station=LGA_GHCND_STATION,
         start_date=daily_start.strftime("%Y-%m-%d"),
         end_date=daily_end.strftime("%Y-%m-%d"),
@@ -738,6 +1115,8 @@ def get_weather_features(
         freq="D",
     )
 
+    # Se mantiene a partir del hourly de x-2:x para evitar depender del cache
+    # anual cuando solo se necesitan tres días.
     daily_23h = _build_23h_daily_from_hourly(
         hourly=hourly,
         days=days_for_23h,
@@ -901,29 +1280,22 @@ def get_weather_features(
     )
 
     # td_anomaly_x requiere climatología histórica de Td_23h.
+    # Optimización:
+    # - Antes: reconstruía hourly_history desde 1980 hasta X en cada llamada.
+    # - Ahora: usa daily_23h por año cacheado en memoria/disco.
     td_anomaly_x = np.nan
 
     if compute_td_anomaly:
-        td_history_start = history_start_ts
-        td_history_end = target_ts
-
-        hourly_history = _fetch_ncei_isd_lite_hourly(
+        td_daily_23h = _fetch_isd_daily_23h_cached(
             station=LGA_ISD_LITE_STATION,
-            start_date=td_history_start.strftime("%Y-%m-%d"),
-            end_date=td_history_end.strftime("%Y-%m-%d"),
+            start_date=history_start_ts.strftime("%Y-%m-%d"),
+            end_date=target_ts.strftime("%Y-%m-%d"),
             tz=CITY_COORDS[city_key]["tz"],
+            execution_hour=execution_hour,
+            tolerance_hours=nearest_tolerance_hours,
         )
 
-        if not hourly_history.empty:
-            td_days = pd.date_range(td_history_start, td_history_end, freq="D")
-
-            td_daily_23h = _build_23h_daily_from_hourly(
-                hourly=hourly_history,
-                days=td_days,
-                execution_hour=execution_hour,
-                tolerance_hours=nearest_tolerance_hours,
-            )
-
+        if not td_daily_23h.empty:
             clim_td_x = _climatology_stats(
                 series=td_daily_23h["Td_23h"],
                 target_ts=target_ts,

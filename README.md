@@ -3711,6 +3711,64 @@ Luego, la nueva version de la lista de features seria:
 
 </details>
 
+<details>
+
+
+<summary><strong>Test de funcion de obtencion de data para nuevas features</strong></summary>
+
+<details>
+
+<summary><strong>Iteracion 1</strong></summary>
+
+Usando el modulo de test, se evaluo la ultima version de la funcion de obtencion de data, en ella se pueden ver los siguientes resultados:
+
+
+| Métrica                    | Resultado | Lectura                                                       |
+| -------------------------- | --------: | ------------------------------------------------------------- |
+| `ok_returns`               |   39 / 50 | Hay filas válidas.                                            |
+| `empty_returns`            |   11 / 50 | Demasiadas filas descartadas.                                 |
+| `ok_ratio`                 |      0.78 | El test falla porque esperabas mínimo 0.90.                   |
+| `errors_total`             |         0 | No hubo excepciones reales.                                   |
+| `schema_variants_count`    |         1 | Bien: cuando retorna datos, el esquema es estable.            |
+| `non_finite_numeric_total` |         0 | Bien: no hay `inf`, `-inf` ni numéricos inválidos.            |
+| `duration_mean_sec`        |   127.6 s | Muy lento.                                                    |
+| `duration_p95_sec`         |   381.8 s | Crítico para minado masivo.                                   |
+| `target_like_key_count`    |         1 | Detecta `t_max_x+1`, esperado si estás en modo entrenamiento. |
+
+
+* problema 1: strict=true está demasiado agresivo
+* problema 2: el rango de test empieza demasiado temprano
+* problema 3: la función es demasiado lenta
+* problema 4: nearest_tolerance_hours=2 puede ser demasiado estricto
+
+Teniendo en cuenta los problemas, se genero la siguiente version:
+
+```python
+
+```
+
+</details>
+<details>
+
+<summary><strong>Iteracion 2</strong></summary>
+
+Resultados de test
+
+
+| Métrica                    | Resultado | Lectura                                                                  |
+| -------------------------- | --------: | ------------------------------------------------------------------------ |
+| `ok_returns`               |   49 / 50 | Muy bien.                                                                |
+| `empty_returns`            |    1 / 50 | Queda una fecha descartada por `strict=True`.                            |
+| `ok_ratio`                 |      0.98 | Pasa el umbral típico de 0.90.                                           |
+| `schema_variants_count`    |         1 | Excelente: el esquema es estable.                                        |
+| `feature_union_count`      |        38 | Retorna las 38 features esperadas.                                       |
+| `non_finite_numeric_total` |         0 | No hay `inf`, `-inf` ni numéricos corruptos.                             |
+| `target_like_key_count`    |         1 | Detecta `t_max_x+1`, normal si estás generando dataset de entrenamiento. |
+
+</details>
+
+</details>
+
 
 <details>
 <summary><strong>Forecasting features</strong></summary>
