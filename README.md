@@ -1204,31 +1204,6 @@ if __name__ == "__main__":
 </details>
 
 <details>
-<summary><strong>Tareas para el SPRINT 2 - V0</strong></summary>
-
-
-Para este 2.º sprint del V0 se buscará mejorar los resultados a través de:
-
-1. Ampliación de features
-2. Redefinir modulo para obtención de data (Posibilidad de cambiar fuente de datos (Open-Meteo))
-3. Testear nueva versión.
-4. Generar dataset 1.1 (para todas las features acumuladas).
-5. Revisión de features a través de estudio de correlaciones.
-6. Split:
-    - Train-val : 1980 - 2020
-    - Test : 2021 - 2026
-7. Entrenamiento:
-    - Se hara una version de entrenamiento para diferentes versiones del dataset analizando las correlaciones
-    - Para validacion se hara un **backtesting - walk-forward**
-8. Evaluación usando set de test.
-
-
-![backtesting](./images/backtesting.png)
-
-
-</details>
-
-<details>
 <summary><strong>Modificacion de script para eliminacion de open-meteo</strong></summary>
 
 
