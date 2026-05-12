@@ -3,3 +3,4 @@ result.txt
 prompt.txt
 estructura.txt
 *.pyc
+*cache*

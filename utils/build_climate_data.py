@@ -1018,7 +1018,7 @@ def get_weather_features(
     date_str: str,
     strict: bool = True,
     execution_hour: int = 23,
-    nearest_tolerance_hours: int = 2,
+    nearest_tolerance_hours: int = 12,
     history_start_date: str = DEFAULT_HISTORY_START_DATE,
     climatology_window_days: int = 7,
     min_climatology_records: int = 30,

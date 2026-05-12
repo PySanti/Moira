@@ -1,0 +1,54 @@
+{
+  "module": "utils.build_climate_data",
+  "function": "get_weather_features",
+  "city": "new york",
+  "start": "1983-01-01",
+  "end": "2025-12-31",
+  "history_start": "1980-01-01",
+  "date_format": "%d-%m-%y",
+  "strict": true,
+  "preload": true,
+  "preload_info": {
+    "elapsed_sec": 0.3473355390000279,
+    "result": {
+      "ncei_daily_year_cache": 47,
+      "isd_lite_raw_year_cache": 0,
+      "isd_lite_processed_year_cache": 48,
+      "isd_daily_23h_year_cache": 47,
+      "disk_cache_enabled": true,
+      "disk_cache_dir": ".weather_cache"
+    }
+  },
+  "skip_existing": true,
+  "output": "dataset/sprint2.csv",
+  "failed_output": "dataset/sprint2_failed_rows.csv",
+  "existing_rows_before": 0,
+  "total_rows_after": 14210,
+  "total_dates_in_range": 15706,
+  "dates_to_process": 15706,
+  "processed": 15706,
+  "ok_new_records": 14210,
+  "empty_returns": 1496,
+  "errors_total": 0,
+  "schema_mismatch_count": 0,
+  "skipped_existing": 0,
+  "error_counts": {},
+  "schema_counts": {
+    "432d204c916aa380": 14210
+  },
+  "attempts_mean": 1.0,
+  "backoff_slept_total_sec": 0.0,
+  "elapsed_sec": 412.817744339,
+  "rows_per_second": 38.04584520742514,
+  "get_weather_features_kwargs": {
+    "strict": true,
+    "execution_hour": 23,
+    "nearest_tolerance_hours": 6,
+    "history_start_date": "1980-01-01",
+    "climatology_window_days": 7,
+    "min_climatology_records": 30,
+    "compute_td_anomaly": true
+  },
+  "allow_schema_variance": false,
+  "generated_at": "2026-05-12T06:55:14"
+}
