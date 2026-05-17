@@ -5166,6 +5166,239 @@ Resultados de test
 
 </details>
 
+# Conclusiones sobre V0-SPRINT 2
+
+<details open>
+<summary><strong>Resumen ejecutivo</strong></summary>
+
+SPRINT 2 corrige el principal problema conceptual de SPRINT 1: el dataset ya no mezcla fuentes meteorológicas de distintas estaciones para las variables centrales. La generación de features queda centrada en **LaGuardia, New York**, usando:
+
+- **NCEI/GHCND Daily Summaries - LaGuardia `USW00014732`** para `TMAX`, `TMIN`, lags, climatología y target oficial `t_max_x+1`.
+- **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`** para features disponibles hasta las 23h del día X.
+- Cálculos internos para estacionalidad, anomalías, tendencias, flags extremos y componentes de viento.
+
+El entrenamiento de `V0-SPRINT 2 / train_1.1` muestra una mejora clara sobre baselines simples, pero también evidencia un techo importante: con observaciones locales hasta las 23h del día X, el modelo todavía no ve con suficiente detalle la dinámica atmosférica que determina la máxima del día X+1, especialmente en primavera.
+
+</details>
+
+<details open>
+<summary><strong>Dataset utilizado</strong></summary>
+
+Archivo usado:
+
+```text
+./dataset/sprint2.csv
+```
+
+Metadata relevante del entrenamiento:
+
+| Elemento | Valor |
+| -------- | ----- |
+| Rango total del dataset | `1983-01-01` a `2025-08-22` |
+| Filas totales usadas por el entrenamiento | `14210` |
+| Target | `t_max_x+1` |
+| Unidad del target | °C |
+| Train/validation temporal | años `< 2021` |
+| Test temporal | años `>= 2021` |
+| Filas train/validation | `12899` |
+| Filas test | `1311` |
+| Año inicial train/validation | `1983` |
+| Año final train/validation | `2020` |
+| Año inicial test | `2021` |
+| Año final test | `2025` |
+
+La validación no usa split aleatorio. Se implementa una validación temporal tipo **expanding-window backtest**:
+
+```text
+train: 1983              -> validation: 1984
+train: 1983-1984         -> validation: 1985
+train: 1983-1985         -> validation: 1986
+...
+train: 1983-2019         -> validation: 2020
+test final: 2021-2025
+```
+
+Esto evita que registros futuros contaminen métricas pasadas.
+
+</details>
+
+<details open>
+<summary><strong>Código de entrenamiento</strong></summary>
+
+Archivo:
+
+```text
+./training/v0-sprint2/train_1.1/main.py
+```
+
+El módulo entrena un modelo tabular usando `scikit-learn`:
+
+```python
+MODEL_PARAMS = {
+    "loss": "absolute_error",
+    "learning_rate": 0.025,
+    "max_iter": 1200,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 25,
+    "l2_regularization": 0.03,
+    "early_stopping": False,
+    "random_state": 42,
+}
+```
+
+Algoritmo:
+
+```text
+HistGradientBoostingRegressor
+```
+
+Motivo de selección:
+
+- Es adecuado para datos tabulares.
+- Captura interacciones no lineales entre temperatura, humedad, presión, viento y estacionalidad.
+- Usa `loss="absolute_error"`, alineando el entrenamiento con la métrica principal: `MAE`.
+- Es más robusto que un modelo lineal simple para relaciones meteorológicas no lineales.
+
+Controles anti-leakage implementados:
+
+- `date`, `date_str` y `t_max_x+1` se excluyen de las features.
+- Cada fold de validación entrena solo con años anteriores.
+- La imputación y el one-hot encoding se ajustan dentro del train de cada fold.
+- El test final usa únicamente años `>= 2021`.
+- Los hiperparámetros se fijan antes del backtesting, evitando tunear contra los años de validación.
+
+Artefactos generados:
+
+| Archivo | Descripción |
+| ------- | ----------- |
+| `best_model.joblib` | Modelo final entrenado con todos los datos pre-test. |
+| `report.json` | Métricas globales, por año, por temporada, baselines y rutas de artefactos. |
+| `validation_predictions.csv` | Predicciones de validación walk-forward. |
+| `test_predictions.csv` | Predicciones del test temporal final. |
+| `plots/*.png` | Gráficos de interpretación del entrenamiento. |
+
+</details>
+
+<details open>
+<summary><strong>Resultados del entrenamiento</strong></summary>
+
+Métricas globales:
+
+| Split | N | MAE (°C) | RMSE (°C) | Median AE (°C) | P90 AE (°C) | Bias (°C) | R² |
+| ----- | -: | -------: | --------: | -------------: | ----------: | --------: | -: |
+| Validación walk-forward | `12542` | `2.3463` | `3.0073` | `1.9272` | `4.8642` | `-0.1422` | `0.9110` |
+| Test 2021+ | `1311` | `2.2369` | `2.9027` | `1.8177` | `4.8157` | `-0.2775` | `0.9010` |
+
+MAE en test por año:
+
+| Año | N | MAE (°C) |
+| ---: | -: | -------: |
+| `2021` | `279` | `2.2748` |
+| `2022` | `286` | `2.1120` |
+| `2023` | `289` | `2.1061` |
+| `2024` | `274` | `2.1500` |
+| `2025` | `183` | `2.7110` |
+
+MAE por temporada:
+
+| Temporada | Validación MAE (°C) | Test MAE (°C) | Lectura |
+| --------- | ------------------: | ------------: | ------- |
+| `winter` | `2.2874` | `2.2972` | Error medio estable, pero sensible a irrupciones frías/cálidas. |
+| `spring` | `2.9304` | `2.9398` | Peor temporada; mayor volatilidad y cambios frontales bruscos. |
+| `summer` | `2.1033` | `1.8945` | Mejor desempeño relativo; régimen térmico más estable. |
+| `autumn` | `2.0487` | `1.7584` | Buen desempeño relativo. |
+
+Comparación contra baselines simples en test:
+
+| Baseline | MAE (°C) | Lectura |
+| -------- | -------: | ------- |
+| `Tmax_so_far_23h_x` | `3.2084` | El modelo mejora ~`0.97 °C` contra usar solo la máxima observada del día X. |
+| `MA_Tmax_3d_asof_23h` | `3.5599` | La media móvil simple queda bastante por detrás. |
+| `climatology_tmax_doy` | `3.3950` | La climatología sirve como referencia, pero no captura eventos sinópticos. |
+| `tmean_ma7` | `4.8944` | Baseline débil para el target de máxima diaria siguiente. |
+
+</details>
+
+<details open>
+<summary><strong>Gráficos generados</strong></summary>
+
+### MAE de validación por año
+
+![MAE de validación por año](./training/v0-sprint2/train_1.1/plots/validation_mae_by_year.png)
+
+Lectura:
+
+- Los primeros años tienen mayor error porque el entrenamiento dispone de menos historial.
+- Entre 2000 y 2020 el MAE se estabiliza alrededor de `2.1-2.4 °C`.
+- No se observa una caída fuerte al agregar más años, lo que sugiere que la limitación principal no es cantidad de datos históricos sino información predictiva faltante.
+
+### MAE por temporada
+
+![MAE por temporada](./training/v0-sprint2/train_1.1/plots/mae_by_season.png)
+
+Lectura:
+
+- Primavera es la estación más difícil, con MAE cercano a `2.94 °C` tanto en validación como en test.
+- Verano y otoño tienen mejor desempeño, probablemente por regímenes térmicos más persistentes.
+- Esta gráfica sugiere que los mayores errores vienen de cambios bruscos de masa de aire, no de estacionalidad básica.
+
+### Test: real vs predicción
+
+![Test real vs predicción](./training/v0-sprint2/train_1.1/plots/test_actual_vs_predicted.png)
+
+Lectura:
+
+- El modelo captura la relación general entre temperatura real y predicha.
+- Hay dispersión relevante alrededor de la diagonal.
+- En extremos y cambios bruscos, el modelo tiende a suavizar la predicción hacia valores más medios.
+
+### Test: serie temporal real vs predicha
+
+![Test serie temporal real vs predicha](./training/v0-sprint2/train_1.1/plots/test_timeseries_actual_vs_predicted.png)
+
+Lectura:
+
+- El modelo sigue bien la estacionalidad anual.
+- Los errores más visibles aparecen en picos o caídas rápidas.
+- Esto refuerza la hipótesis de que faltan variables de forecast o información regional/upstream.
+
+### Distribución de errores
+
+![Distribución de errores](./training/v0-sprint2/train_1.1/plots/error_distribution.png)
+
+Lectura:
+
+- La distribución está centrada cerca de cero, pero con colas largas.
+- El MAE global queda penalizado por eventos extremos o transiciones rápidas.
+- En test, el bias es `-0.2775 °C`, indicando una ligera tendencia a subestimar la Tmax de X+1.
+
+</details>
+
+<details open>
+<summary><strong>Conclusiones técnicas</strong></summary>
+
+1. **SPRINT 2 mejora la integridad del dataset**, especialmente al unificar fuentes alrededor de LaGuardia y respetar el corte as-of 23h.
+
+2. **Agregar más features no produjo una mejora proporcional**, porque muchas features nuevas son transformaciones de la misma información térmica, estacional o local.
+
+3. **El cuello de botella no parece ser el algoritmo**, sino la falta de información atmosférica predictiva sobre el día X+1.
+
+4. **Primavera concentra el mayor error**, lo cual es consistente con cambios frontales y transiciones rápidas de masa de aire en New York.
+
+5. **El objetivo de `0.2 °C MAE` no parece factible con este set de features no-forecast**. El resultado actual está en `2.2369 °C` de MAE en test, y los errores de cola superan `4.8 °C` en el percentil 90.
+
+6. **Para una mejora sustancial, el siguiente sprint debería incorporar forecasting externo**, por ejemplo:
+
+| Feature propuesta | Fuente | Motivo |
+| ----------------- | ------ | ------ |
+| `forecast_tmax_x+1` | NBM / HRRR / GFS / NWS / Open-Meteo forecast archive | Probablemente la feature más potente. |
+| `forecast_anomaly_x+1` | Forecast externo + climatología LaGuardia | Captura qué tan extremo se espera el día siguiente. |
+| `forecast_error_tmax_lag1` | Forecast histórico + observado GHCND | Corrige sesgo reciente del forecast externo. |
+| `forecast_error_tmax_ma3` | Forecast histórico + observado GHCND | Detecta si el forecast viene subestimando/sobrestimando. |
+| Variables regionales/upstream | JFK, Newark, Central Park, estaciones al oeste/noroeste | Ayudan a detectar advección y cambios de masa de aire. |
+
+</details>
+
 # Desarrollo de V1
 
 ![Versión 1 image](./images/v1.png)
@@ -5177,4 +5410,3 @@ Resultados de test
 # Desarrollo de V3
 
 ![Versión 3 image](./images/v3.png)
-
