@@ -5399,6 +5399,165 @@ Lectura:
 
 </details>
 
+# Sprint 3-v0
+
+<details open>
+<summary><strong>Objetivo del sprint</strong></summary>
+
+SPRINT 3-v0 parte de la conclusion de SPRINT 2: el modelo ya esta construido con fuentes consistentes de LaGuardia y respeta el corte **as-of 23h del dia X**, pero todavia le falta informacion sobre la dinamica atmosferica que conecta el cierre del dia X con la maxima de X+1.
+
+El foco de este sprint es enriquecer `./utils/build_climate_data.py` sin cambiar la definicion del target:
+
+- Mantener todas las features de SPRINT 2.
+- Agregar senales intradia disponibles antes o exactamente a las 23h de X.
+- Agregar memoria termica de dias completos ya cerrados, siempre hasta X-1.
+- Agregar climatologia del dia siguiente calculada solo con registros historicos anteriores a X.
+- Evitar forecast externo por ahora, salvo que exista una fuente de snapshots historicos emitidos antes de las 23h de X.
+
+No se incorporaron forecasts externos en esta iteracion. Un forecast real puede ser muy potente, pero para entrenamiento historico debe venir de un archivo de pronosticos emitidos antes del cierre de X. Usar reanalysis, observaciones de X+1 o forecasts regenerados hoy para fechas pasadas introduciria leakage.
+
+</details>
+
+<details open>
+<summary><strong>Features agregadas</strong></summary>
+
+La nueva version conserva el esquema anterior y agrega **95 features**. En `train_mode` el output pasa a tener `133` keys incluyendo `t_max_x+1`; en `inference_mode` devuelve `132` keys y excluye el target.
+
+| Grupo | Features agregadas | Fuente / calculo | Motivo esperado |
+| ----- | ------------------ | ---------------- | --------------- |
+| Temperatura puntual intradia | `Temp_23h_x`, `Temp_06h_x`, `Temp_12h_x`, `Temp_18h_x`, `Temp_21h_x` | ISD-Lite LaGuardia, observacion disponible a cada hora o la anterior dentro de tolerancia; nunca usa observaciones futuras. | Describe la trayectoria termica del dia X, no solo el maximo/minimo. Ayuda a distinguir dias que cierran enfriando fuerte de dias que mantienen masa calida. |
+| Cambios termicos intradia | `Temp_change_23h_minus_18h`, `Temp_change_23h_minus_12h`, `Temp_change_23h_minus_06h`, `Temp_change_23h_1d` | Diferencias entre temperatura de 23h y puntos previos del dia X o 23h de X-1. | Captura enfriamiento nocturno, persistencia y cambio de masa de aire. |
+| Estadistica termica del dia X | `Temp_std_00_23h_x`, `Temp_range_00_23h_x`, `Temp_mean_last_6h`, `Temp_min_last_6h`, `Temp_max_last_6h` | Agregados de `Temp_C` en ISD-Lite hasta 23h. | Resume volatilidad intradia y estado termico reciente antes del corte. |
+| Tendencia termica reciente | `Temp_change_last_3h`, `Temp_change_last_6h`, `Temp_change_last_12h`, `Temp_slope_last_6h`, `Temp_slope_last_12h` | Cambios y pendientes lineales de observaciones horarias hasta 23h. | Da una senal directa de si la temperatura viene cayendo, subiendo o estabilizandose al cierre. |
+| Punto de rocio intradia | `Td_mean_00_23h_x`, `Td_min_00_23h_x`, `Td_max_00_23h_x`, `Td_mean_last_6h`, `Td_change_last_6h` | ISD-Lite LaGuardia, usando `dew_point_temperature / 10`. | El punto de rocio aproxima contenido de humedad y masa de aire; suele anticipar noches calidas/frias y cambios frontales. |
+| Humedad relativa intradia | `HR_mean_00_23h_x`, `HR_min_00_23h_x`, `HR_max_00_23h_x`, `HR_mean_last_6h`, `HR_change_last_6h` | Humedad calculada con formula Magnus desde temperatura y punto de rocio. | Complementa Td; ayuda a separar calor seco, aire maritimo humedo y enfriamiento radiativo. |
+| Presion intradia | `SLP_mean_00_23h_x`, `SLP_min_00_23h_x`, `SLP_max_00_23h_x`, `SLP_change_last_3h`, `SLP_change_last_6h`, `SLP_change_last_12h` | ISD-Lite LaGuardia hasta 23h. | Cambios de presion son proxies de frentes, adveccion y transiciones sinopticas. |
+| Viento intradia | `WindSpd_mean_00_23h_x`, `WindSpd_max_00_23h_x`, `WindSpd_mean_last_6h`, `WindSpd_change_last_6h` | ISD-Lite LaGuardia hasta 23h. | Viento fuerte o cambiante puede indicar mezcla, adveccion o paso frontal. |
+| Nubosidad intradia | `Cloud_mean_00_23h_x`, `Cloud_max_00_23h_x`, `Cloud_mean_last_6h`, `Cloud_change_last_6h` | `sky_condition` de ISD-Lite convertido a porcentaje aproximado. | La nubosidad modula enfriamiento nocturno y calentamiento del dia siguiente. |
+| Precipitacion reciente | `Precip_sum_last_6h`, `Precip_sum_last_12h`, `Precip_positive_hours_00_23h`, `Precip_positive_hours_last_6h`, `Precip_flag_00_23h` | `Precip_1h` de ISD-Lite; fallback local ya existente para acumulado diario. | Lluvia reciente sugiere nubosidad, humedad alta, evaporacion y cambios frontales. |
+| Humedad fisica derivada | `Temp_dewpoint_spread_23h`, `Temp_dewpoint_spread_mean_00_23h`, `Vapor_pressure_23h` | Diferencia `Temp_C - Td` y presion de vapor aproximada desde Td. | Resume saturacion del aire y potencial de enfriamiento nocturno. |
+| Climatologia del dia X ampliada | `climatology_tmax_std_doy`, `climatology_tmax_p10_doy`, `climatology_tmax_p90_doy` | GHCND LaGuardia, solo fechas anteriores a X. | Da al modelo escala de normalidad y extremos para el dia actual. |
+| Climatologia del dia siguiente | `climatology_tmax_doy_plus1`, `climatology_tmax_std_doy_plus1`, `climatology_tmax_p10_doy_plus1`, `climatology_tmax_p90_doy_plus1`, `climatology_tmin_doy_plus1`, `climatology_tmean_doy_plus1` | GHCND LaGuardia para el dia del anio de X+1, filtrando `index < X`. | Es un prior fuerte para la Tmax de X+1 sin mirar el target real. |
+| Delta climatologico hacia X+1 | `climatology_tmax_delta_doy_plus1_minus_x`, `tmax_anomaly_vs_doy_plus1` | Diferencia entre climatologia de X+1 y X, y anomalia de `Tmax_so_far_23h_x` contra la climatologia de X+1. | Ayuda durante transiciones estacionales, donde la normal climatologica cambia dia a dia. |
+| Lags diarios completados | `tmax_lag1`, `tmin_lag2`, `tmin_lag3`, `tmin_lag7`, `tmean_lag1`, `tmean_lag2`, `tmean_lag3`, `dtr_lag1` | GHCND LaGuardia, solo dias completos hasta X-1. | Refuerza persistencia termica y amplitud diaria reciente. |
+| Rolling windows diarios | `tmax_ma3_completed`, `tmax_ma7_completed`, `tmax_ma14_completed`, `tmax_std7_completed`, `tmax_min7_completed`, `tmax_max7_completed`, `tmin_ma3_completed`, `tmin_ma7_completed`, `tmean_ma3_completed`, `tmean_ma14_completed`, `tmean_std7_completed`, `dtr_ma7_completed` | Ventanas de dias completos, siempre terminando en X-1. | Captura regimen reciente y volatilidad, evitando mezclar la observacion parcial de X con dias oficiales completos. |
+| Cambios y rachas diarias | `tmax_change_1d_completed`, `tmax_change_3d_completed`, `tmax_recent_warming_streak`, `tmax_recent_cooling_streak` | GHCND LaGuardia hasta X-1. | Identifica calentamientos/enfriamientos persistentes que un promedio simple suaviza. |
+| Estado 23h multidia | `Temp_23h_ma3`, `Temp_23h_trend_3d`, `HR_23h_ma3`, `WindSpd_23h_ma3` | Tabla diaria 23h construida desde ISD-Lite para X-2, X-1, X. | Resume persistencia nocturna y condiciones de cierre en varios dias. |
+| Estacionalidad adicional | `month_sin`, `month_cos`, `daylight_hours_x`, `daylight_hours_plus1`, `daylight_delta_plus1_minus_x` | Calculo deterministico desde fecha y latitud de New York. | Daylength aporta una senal fisica suave de radiacion disponible, distinta de `doy_sin/cos`. |
+
+</details>
+
+<details open>
+<summary><strong>Cambios en build_climate_data.py</strong></summary>
+
+Archivo modificado:
+
+```text
+./utils/build_climate_data.py
+```
+
+Cambios principales:
+
+1. Se mantiene el contrato `train_mode` / `inference_mode`.
+   - `train_mode` devuelve todas las features y el target oficial `t_max_x+1`.
+   - `inference_mode` devuelve las mismas features disponibles al cierre de X, sin `t_max_x+1`.
+
+2. Se agrego `Temp_23h` a la tabla diaria 23h interna de ISD-Lite.
+   - `_build_23h_daily_from_hourly(...)` ahora devuelve `Temp_23h`, `HR_23h`, `Td_23h`, `SLP_23h`, `WindSpd_23h`, `WindDir_23h`, `Cloud_23h`.
+   - Se incremento la version del cache `ISD_DAILY_23H_CACHE_VERSION = 2` para no reutilizar pickles antiguos sin la nueva columna.
+
+3. Se agregaron helpers genericos para evitar duplicacion:
+   - `_stat_if_enough(...)`
+   - `_completed_daily_values(...)`
+   - `_rows_within_last_hours(...)`
+   - `_stat_from_rows(...)`
+   - `_change_from_rows(...)`
+   - `_slope_from_rows(...)`
+   - `_value_at_or_before(...)`
+   - `_precip_sum_from_rows(...)`
+   - `_positive_precip_hours(...)`
+   - `_vapor_pressure_hpa(...)`
+   - `_daylight_hours(...)`
+   - `_recent_directional_streak(...)`
+
+4. La climatologia ahora devuelve tambien `median`, `std` e `iqr`, ademas de `mean`, `p10`, `p90` y `n`.
+
+5. Todas las features nuevas respetan el corte temporal:
+   - ISD-Lite se filtra hasta `execution_dt = X 23:00`.
+   - Las lecturas por hora usan `_value_at_or_before(...)`, que solo mira hacia atras.
+   - Las ventanas intradia usan observaciones `<= 23h`.
+   - Los rolling windows diarios usan GHCND hasta X-1.
+   - La climatologia de X+1 usa `available_until_ts=target_ts`, por lo que filtra historico con `index < X`.
+
+6. `strict=True` sigue descartando filas sin features base necesarias, pero permite faltantes puntuales en senales intradia granulares por huecos horarios de ISD-Lite. Las keys existen siempre; el pipeline de entrenamiento puede imputar esos valores.
+
+</details>
+
+<details open>
+<summary><strong>Cambios en test.py</strong></summary>
+
+Archivo modificado:
+
+```text
+./utils/test.py
+```
+
+Cambios principales:
+
+- El modulo por defecto ahora es `utils.build_climate_data`, pero mantiene fallback para importar `build_climate_data` desde `utils`.
+- Se agregaron parametros del contrato nuevo:
+
+```text
+--mode
+--include-target
+--history-start
+--execution-hour
+--nearest-tolerance-hours
+--min-climatology-records
+--climatology-window-days
+--compute-td-anomaly
+--run-inference-leakage-check
+--inference-check-samples
+```
+
+- El tester ahora pasa kwargs dinamicamente segun la firma real de `get_weather_features`.
+- Se agrego una auditoria de leakage: ejecuta una muestra en `inference_mode` con `include_target=False` y falla si aparece `t_max_x+1`.
+- El resumen JSON registra los parametros efectivos usados para construir las features.
+
+Comando recomendado para Sprint 3-v0:
+
+```bash
+python3 utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 1000 \
+  --strict true \
+  --mode train_mode \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/feature_contract_test
+```
+
+</details>
+
+<details open>
+<summary><strong>Dependencias</strong></summary>
+
+SPRINT 3-v0 no introduce dependencias nuevas. Las features agregadas usan el stack ya presente en el proyecto:
+
+```text
+requests
+pandas
+numpy
+```
+
+Para entrenamiento se sigue necesitando `scikit-learn`, como en SPRINT 2. El intento de instalarlo en el entorno actual con `python3 -m pip install scikit-learn --user` fue bloqueado por la politica PEP 668 del sistema (`externally-managed-environment`). La forma recomendada es usar un virtualenv del proyecto o instalar desde el gestor del sistema.
+
+</details>
+
 # Desarrollo de V1
 
 ![Versión 1 image](./images/v1.png)

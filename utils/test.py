@@ -18,16 +18,19 @@ Objetivo:
     4. Los valores son serializables.
     5. No hay numéricos infinitos.
     6. Reporta nulls, errores, tiempos, variantes de esquema y features tipo target.
+    7. Puede ejecutar train_mode/inference_mode y auditar que inference no
+       devuelva el target oficial.
 
 Uso recomendado:
   python test.py \
-    --module build_climate_data \
+    --module utils.build_climate_data \
     --function get_weather_features \
     --city "new york" \
     --start 1980-01-01 \
     --end 2025-12-31 \
     --n-samples 1000 \
     --strict false \
+    --mode train_mode \
     --out-dir ./reports/feature_contract_test
 
 Uso rápido:
@@ -82,6 +85,16 @@ def str2bool(value: str | bool) -> bool:
     raise argparse.ArgumentTypeError(f"Valor booleano inválido: {value}")
 
 
+def optional_bool(value: str | bool | None) -> bool | None:
+    if value is None:
+        return None
+
+    if isinstance(value, str) and value.strip().lower() in {"none", "null", "auto"}:
+        return None
+
+    return str2bool(value)
+
+
 def parse_iso_date(value: str) -> date:
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
@@ -111,15 +124,33 @@ def date_to_function_str(d: date, date_format: str) -> str:
 # Import dinámico
 # ----------------------------
 
+def ensure_project_root_on_path() -> None:
+    root = Path(__file__).resolve().parents[1]
+    root_str = str(root)
+
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+
+
 def load_function(module_name: str, function_name: str):
+    ensure_project_root_on_path()
+
     try:
         module = importlib.import_module(module_name)
     except Exception as exc:
-        raise RuntimeError(
-            f"No pude importar el módulo '{module_name}'. "
-            f"Ejecuta este test desde la carpeta donde exista {module_name}.py "
-            "o ajusta PYTHONPATH."
-        ) from exc
+        if not module_name.startswith("utils."):
+            try:
+                module = importlib.import_module(f"utils.{module_name}")
+            except Exception:
+                raise RuntimeError(
+                    f"No pude importar el módulo '{module_name}'. "
+                    f"Ejecuta este test desde la raíz del proyecto o ajusta PYTHONPATH."
+                ) from exc
+        else:
+            raise RuntimeError(
+                f"No pude importar el módulo '{module_name}'. "
+                f"Ejecuta este test desde la raíz del proyecto o ajusta PYTHONPATH."
+            ) from exc
 
     if not hasattr(module, function_name):
         raise RuntimeError(
@@ -350,7 +381,7 @@ def call_with_retry(
     fn,
     city: str,
     date_str: str,
-    strict: bool,
+    kwargs: dict[str, Any],
     max_retries: int,
     backoff_base_sec: float,
     backoff_jitter_sec: float,
@@ -359,11 +390,6 @@ def call_with_retry(
     slept = 0.0
     last_error_type = None
     last_error_msg = None
-
-    kwargs = {}
-
-    if function_accepts_kwarg(fn, "strict"):
-        kwargs["strict"] = strict
 
     for retry in range(max_retries + 1):
         attempts += 1
@@ -391,6 +417,98 @@ def call_with_retry(
             return None, attempts, slept, last_error_type, last_error_msg
 
     return None, attempts, slept, last_error_type, last_error_msg
+
+
+def filter_kwargs_for_function(fn, kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: v
+        for k, v in kwargs.items()
+        if v is not None and function_accepts_kwarg(fn, k)
+    }
+
+
+def build_weather_kwargs(args, fn, mode: str, include_target: bool | None) -> dict[str, Any]:
+    raw = {
+        "strict": args.strict,
+        "execution_hour": args.execution_hour,
+        "nearest_tolerance_hours": args.nearest_tolerance_hours,
+        "history_start_date": args.history_start.isoformat(),
+        "climatology_window_days": args.climatology_window_days,
+        "min_climatology_records": args.min_climatology_records,
+        "compute_td_anomaly": args.compute_td_anomaly,
+        "mode": mode,
+        "include_target": include_target,
+    }
+
+    return filter_kwargs_for_function(fn, raw)
+
+
+def run_inference_leakage_check(
+    fn,
+    args,
+    dates: list[date],
+) -> dict[str, Any]:
+    if not args.run_inference_leakage_check:
+        return {
+            "checked": 0,
+            "failures": 0,
+            "target_like_keys": [],
+            "errors": [],
+        }
+
+    check_dates = dates[:max(0, min(args.inference_check_samples, len(dates)))]
+    kwargs = build_weather_kwargs(
+        args=args,
+        fn=fn,
+        mode="inference_mode",
+        include_target=False,
+    )
+
+    failures = []
+    target_like_keys = set()
+    errors = []
+
+    for d in check_dates:
+        ds = date_to_function_str(d, args.date_format)
+        features, _, _, error_type, error_msg = call_with_retry(
+            fn=fn,
+            city=args.city,
+            date_str=ds,
+            kwargs=kwargs,
+            max_retries=args.max_retries,
+            backoff_base_sec=args.backoff_base_sec,
+            backoff_jitter_sec=args.backoff_jitter_sec,
+        )
+
+        if error_type is not None:
+            errors.append({
+                "date": d.isoformat(),
+                "error_type": error_type,
+                "error_msg": error_msg,
+            })
+            continue
+
+        if not isinstance(features, dict) or len(features) == 0:
+            continue
+
+        keys = {str(k) for k in features.keys()}
+        leaked = sorted(keys & {"t_max_x+1"})
+
+        if leaked:
+            failures.append({
+                "date": d.isoformat(),
+                "leaked_keys": leaked,
+            })
+
+        target_like_keys.update(k for k in keys if looks_like_target_key(k))
+
+    return {
+        "checked": len(check_dates),
+        "failures": len(failures),
+        "failure_examples": failures[:10],
+        "target_like_keys": sorted(target_like_keys),
+        "errors": errors[:10],
+    }
 
 
 # ----------------------------
@@ -515,7 +633,7 @@ def main() -> int:
         description="Test dinámico de contrato para get_weather_features."
     )
 
-    ap.add_argument("--module", default="build_climate_data")
+    ap.add_argument("--module", default="utils.build_climate_data")
     ap.add_argument("--function", default="get_weather_features")
     ap.add_argument("--city", default="new york")
 
@@ -532,6 +650,16 @@ def main() -> int:
     )
 
     ap.add_argument("--strict", type=str2bool, default=False)
+    ap.add_argument("--mode", default="train_mode")
+    ap.add_argument("--include-target", type=optional_bool, default=None)
+    ap.add_argument("--history-start", type=parse_iso_date, default=parse_iso_date("1980-01-01"))
+    ap.add_argument("--execution-hour", type=int, default=23)
+    ap.add_argument("--nearest-tolerance-hours", type=int, default=6)
+    ap.add_argument("--min-climatology-records", type=int, default=30)
+    ap.add_argument("--climatology-window-days", type=int, default=7)
+    ap.add_argument("--compute-td-anomaly", type=str2bool, default=True)
+    ap.add_argument("--run-inference-leakage-check", type=str2bool, default=True)
+    ap.add_argument("--inference-check-samples", type=int, default=10)
 
     ap.add_argument("--sleep-between-calls-sec", type=float, default=0.15)
     ap.add_argument("--max-retries", type=int, default=5)
@@ -554,6 +682,12 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fn = load_function(args.module, args.function)
+    function_kwargs = build_weather_kwargs(
+        args=args,
+        fn=fn,
+        mode=args.mode,
+        include_target=args.include_target,
+    )
 
     dates = random_dates(
         start=args.start,
@@ -570,6 +704,8 @@ def main() -> int:
     print(f"Samples: {len(dates)}")
     print(f"Date format: {args.date_format}")
     print(f"strict={args.strict}")
+    print(f"mode={args.mode}")
+    print(f"function kwargs={function_kwargs}")
     print(f"Output dir: {out_dir.resolve()}")
     print("No hardcoded EXPECTED_FEATURE_KEYS.\n")
 
@@ -598,7 +734,7 @@ def main() -> int:
             fn=fn,
             city=args.city,
             date_str=ds,
-            strict=args.strict,
+            kwargs=function_kwargs,
             max_retries=args.max_retries,
             backoff_base_sec=args.backoff_base_sec,
             backoff_jitter_sec=args.backoff_jitter_sec,
@@ -752,6 +888,12 @@ def main() -> int:
         else pd.DataFrame()
     )
 
+    inference_leakage_check = run_inference_leakage_check(
+        fn=fn,
+        args=args,
+        dates=dates,
+    )
+
     summary = {
         "module": args.module,
         "function": args.function,
@@ -760,6 +902,15 @@ def main() -> int:
         "date_range_end": args.end.isoformat(),
         "date_format": args.date_format,
         "strict": args.strict,
+        "mode": args.mode,
+        "include_target": args.include_target,
+        "history_start": args.history_start.isoformat(),
+        "execution_hour": args.execution_hour,
+        "nearest_tolerance_hours": args.nearest_tolerance_hours,
+        "climatology_window_days": args.climatology_window_days,
+        "min_climatology_records": args.min_climatology_records,
+        "compute_td_anomaly": args.compute_td_anomaly,
+        "function_kwargs": function_kwargs,
         "samples_total": total,
         "ok_returns": ok_count,
         "empty_returns": empty_count,
@@ -782,6 +933,7 @@ def main() -> int:
         "backoff_slept_total_sec": sum(backoff_slept_list),
         "non_finite_numeric_total": int(len(non_finite_df)),
         "target_like_key_count": int(len(target_like_df)) if not target_like_df.empty else 0,
+        "inference_leakage_check": inference_leakage_check,
         "seed": args.seed,
         "sampling_no_replacement": args.no_replacement,
     }
@@ -895,6 +1047,11 @@ def main() -> int:
     if not args.allow_non_finite and len(non_finite_df) > 0:
         failures.append(
             f"non_finite_numeric_total={len(non_finite_df)} > 0."
+        )
+
+    if inference_leakage_check.get("failures", 0) > 0:
+        failures.append(
+            "inference_mode devolvió el target oficial t_max_x+1."
         )
 
     if failures:
