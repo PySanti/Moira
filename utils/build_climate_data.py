@@ -193,6 +193,54 @@ def _season_from_month(month: int) -> str:
     return "autumn"
 
 
+def _resolve_feature_mode(mode: str, include_target: bool | None) -> str:
+    """
+    Normaliza el modo de uso de get_weather_features.
+
+    - train_mode: devuelve features + target t_max_x+1.
+    - inference_mode: devuelve solo features disponibles al cierre de 23h.
+
+    include_target se mantiene como alias de compatibilidad para scripts como
+    utils/miner.py, que ya exponían ese flag.
+    """
+    normalized = str(mode).strip().lower().replace("-", "_")
+
+    aliases = {
+        "train": "train_mode",
+        "training": "train_mode",
+        "train_mode": "train_mode",
+        "inference": "inference_mode",
+        "infer": "inference_mode",
+        "inference_mode": "inference_mode",
+        "predict": "inference_mode",
+        "prediction": "inference_mode",
+    }
+
+    if normalized not in aliases:
+        raise ValueError(
+            "mode inválido. Use 'train_mode' o 'inference_mode'."
+        )
+
+    resolved = aliases[normalized]
+
+    if include_target is not None:
+        if isinstance(include_target, str):
+            include_target_value = include_target.strip().lower()
+
+            if include_target_value in {"true", "1", "yes", "y", "si", "sí"}:
+                include_target = True
+            elif include_target_value in {"false", "0", "no", "n"}:
+                include_target = False
+            else:
+                raise ValueError(
+                    "include_target inválido. Use True/False."
+                )
+
+        resolved = "train_mode" if bool(include_target) else "inference_mode"
+
+    return resolved
+
+
 def _circular_doy_distance(doy_values: np.ndarray, target_doy: int) -> np.ndarray:
     raw = np.abs(doy_values - target_doy)
     return np.minimum(raw, 366 - raw)
@@ -1023,6 +1071,8 @@ def get_weather_features(
     climatology_window_days: int = 7,
     min_climatology_records: int = 30,
     compute_td_anomaly: bool = True,
+    mode: str = "train_mode",
+    include_target: bool | None = None,
 ) -> dict:
     """
     Genera features usando únicamente información disponible hasta las 23:00
@@ -1031,8 +1081,14 @@ def get_weather_features(
     date_str:
       formato esperado: "%d-%m-%y"
 
-    Target:
-      - t_max_x+1 sale de NCEI/GHCND Daily Summaries.
+    mode:
+      - "train_mode": devuelve features + target t_max_x+1.
+      - "inference_mode": devuelve solo features disponibles al cierre de 23h.
+
+    include_target:
+      alias de compatibilidad:
+      - True => train_mode
+      - False => inference_mode
 
     Features:
       - Variables horarias vienen de ISD-Lite / sensores de LaGuardia.
@@ -1049,6 +1105,12 @@ def get_weather_features(
             "Esta versión solo implementa fuentes NCEI/LaGuardia para New York."
         )
 
+    feature_mode = _resolve_feature_mode(
+        mode=mode,
+        include_target=include_target,
+    )
+    is_train_mode = feature_mode == "train_mode"
+
     target_date = datetime.strptime(date_str, "%d-%m-%y")
 
     target_ts = pd.to_datetime(target_date.strftime("%Y-%m-%d")).normalize()
@@ -1061,9 +1123,9 @@ def get_weather_features(
     # Daily Summaries:
     # - histórico completo para climatología Tmax.
     # - x-7 para lags y medias.
-    # - x+1 para target.
+    # - x+1 solo en train_mode para target.
     daily_start = min(history_start_ts, target_ts - pd.Timedelta(days=7))
-    daily_end = next_ts
+    daily_end = next_ts if is_train_mode else target_ts
 
     daily_idx = pd.date_range(daily_start, daily_end, freq="D")
 
@@ -1321,10 +1383,6 @@ def get_weather_features(
     doy_sin = np.sin(2 * np.pi * doy / 365.25)
     doy_cos = np.cos(2 * np.pi * doy / 365.25)
 
-    # ---------------- TARGET ----------------
-
-    target_x_plus_1 = _df_value(ncei_daily, next_ts, "TMAX")
-
     features = {
         # Base as-of 23h
         "Tmax_so_far_23h_x": _safe(tmax_so_far_23h_x),
@@ -1365,14 +1423,22 @@ def get_weather_features(
         "extreme_heat_flag": _safe(extreme_heat_flag),
         "extreme_cold_flag": _safe(extreme_cold_flag),
 
-        # Target oficial
-        "t_max_x+1": _safe(target_x_plus_1),
-
         # Metadata / estacionalidad
         "ciudad": city,
         "doy_sin": _safe(doy_sin),
         "doy_cos": _safe(doy_cos),
     }
+
+    if is_train_mode:
+        # Target oficial. Solo se devuelve en train_mode para evitar leakage
+        # accidental en inferencia.
+        target_x_plus_1 = _df_value(ncei_daily, next_ts, "TMAX")
+        metadata_features = {
+            key: features.pop(key)
+            for key in ["ciudad", "doy_sin", "doy_cos"]
+        }
+        features["t_max_x+1"] = _safe(target_x_plus_1)
+        features.update(metadata_features)
 
     if strict:
         allowed_non_numeric = {"ciudad", "season"}
