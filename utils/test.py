@@ -7,10 +7,8 @@ test.py
 Test dinámico para build_climate_data.get_weather_features.
 
 Objetivo:
-- No hardcodea nombres de features.
-- No depende de EXPECTED_FEATURE_KEYS.
-- Si actualizas build_climate_data agregando, quitando o renombrando features,
-  este test sigue funcionando sin cambios.
+- Mantiene el test dinámico del contrato general.
+- Puede endurecer validaciones específicas del contrato Sprint 3-v0.
 - Evalúa el contrato general del módulo:
     1. La función se puede importar.
     2. La función retorna dict no vacío para fechas válidas.
@@ -19,7 +17,8 @@ Objetivo:
     5. No hay numéricos infinitos.
     6. Reporta nulls, errores, tiempos, variantes de esquema y features tipo target.
     7. Puede ejecutar train_mode/inference_mode y auditar que inference no
-       devuelva el target oficial.
+        devuelva el target oficial.
+    8. Puede validar invariantes estrictas del output de build_climate_data.
 
 Uso recomendado:
   python test.py \
@@ -37,9 +36,9 @@ Uso rápido:
   python test.py --n-samples 50
 
 Notas:
-- Este test valida la forma general y estabilidad del output.
-- No puede validar por sí solo que una feature venga de LaGuardia o sea "as-of 23h";
-  para eso build_climate_data debería exponer metadata/contratos de fuente.
+- En modo estricto de contrato para Sprint 3-v0, el test sí valida varias
+  invariantes observables del output y la paridad train/inference.
+- No puede probar por sí solo el origen real de cada dato aguas arriba.
 
 
    python .\test.py --module build_climate_data --function get_weather_features --city "new york" --start 1980-01-01 --end 2025-12-12 --n-samples 50 --strict True
@@ -511,6 +510,434 @@ def run_inference_leakage_check(
     }
 
 
+def normalize_feature_mode(mode: str, include_target: bool | None) -> str:
+    normalized = str(mode).strip().lower().replace("-", "_")
+    aliases = {
+        "train": "train_mode",
+        "training": "train_mode",
+        "train_mode": "train_mode",
+        "inference": "inference_mode",
+        "infer": "inference_mode",
+        "predict": "inference_mode",
+        "prediction": "inference_mode",
+        "inference_mode": "inference_mode",
+    }
+
+    resolved = aliases.get(normalized, normalized)
+
+    if include_target is not None:
+        resolved = "train_mode" if include_target else "inference_mode"
+
+    return resolved
+
+
+def is_build_climate_contract_target(args) -> bool:
+    module_name = str(args.module).strip().lower()
+    function_name = str(args.function).strip().lower()
+    return (
+        args.enforce_build_climate_contract
+        and function_name == "get_weather_features"
+        and module_name.endswith("build_climate_data")
+    )
+
+
+def strict_allowed_missing_keys() -> set[str]:
+    return {
+        "td_anomaly_x",
+        "Temp_06h_x",
+        "Temp_12h_x",
+        "Temp_18h_x",
+        "Temp_21h_x",
+        "Temp_change_23h_minus_18h",
+        "Temp_change_23h_minus_12h",
+        "Temp_change_23h_minus_06h",
+        "Temp_change_23h_1d",
+        "Temp_change_last_3h",
+        "Temp_change_last_6h",
+        "Temp_change_last_12h",
+        "Temp_slope_last_6h",
+        "Temp_slope_last_12h",
+        "Td_change_last_6h",
+        "HR_change_last_6h",
+        "SLP_change_last_3h",
+        "SLP_change_last_6h",
+        "SLP_change_last_12h",
+        "WindSpd_change_last_6h",
+        "Cloud_change_last_6h",
+        "Precip_positive_hours_00_23h",
+        "Precip_positive_hours_last_6h",
+        "Temp_23h_ma3",
+        "Temp_23h_trend_3d",
+        "HR_23h_ma3",
+        "WindSpd_23h_ma3",
+    }
+
+
+def sprint3_required_feature_keys(include_target: bool) -> set[str]:
+    keys = {
+        "Tmax_so_far_23h_x",
+        "Tmin_so_far_23h_x",
+        "Tmean_so_far_23h_x",
+        "Temp_23h_x",
+        "DTR_so_far_23h_x",
+        "HR_23h_x",
+        "Td_23h_x",
+        "SLP_23h_x",
+        "WindSpd_23h_x",
+        "Cloud_23h_x",
+        "Precip_sum_00_23h_x",
+        "Temp_std_00_23h_x",
+        "Td_mean_00_23h_x",
+        "HR_mean_00_23h_x",
+        "SLP_mean_00_23h_x",
+        "WindSpd_mean_00_23h_x",
+        "Cloud_mean_00_23h_x",
+        "Precip_sum_last_6h",
+        "Temp_dewpoint_spread_23h",
+        "Vapor_pressure_23h",
+        "climatology_tmax_doy",
+        "climatology_tmax_doy_plus1",
+        "climatology_tmax_delta_doy_plus1_minus_x",
+        "tmax_anomaly_x",
+        "tmax_anomaly_vs_doy_plus1",
+        "tmax_lag1",
+        "tmin_lag1",
+        "tmean_lag1",
+        "tmax_ma7_completed",
+        "tmean_ma7",
+        "dtr_ma7_completed",
+        "Temp_23h_ma3",
+        "HR_23h_ma3",
+        "WindSpd_23h_ma3",
+        "wind_u",
+        "wind_v",
+        "pressure_trend_3d",
+        "month",
+        "month_sin",
+        "month_cos",
+        "season",
+        "extreme_heat_flag",
+        "extreme_cold_flag",
+        "daylight_hours_x",
+        "daylight_hours_plus1",
+        "daylight_delta_plus1_minus_x",
+        "ciudad",
+        "doy_sin",
+        "doy_cos",
+    }
+
+    if include_target:
+        keys.add("t_max_x+1")
+
+    return keys
+
+
+def approx_equal(a: Any, b: Any, tol: float = 1e-6) -> bool:
+    if is_null(a) and is_null(b):
+        return True
+
+    if is_null(a) or is_null(b):
+        return False
+
+    if isinstance(a, (bool, np.bool_)) or isinstance(b, (bool, np.bool_)):
+        return bool(a) == bool(b)
+
+    if isinstance(a, (int, float, np.integer, np.floating)) and isinstance(
+        b,
+        (int, float, np.integer, np.floating),
+    ):
+        return math.isclose(float(a), float(b), rel_tol=tol, abs_tol=tol)
+
+    return a == b
+
+
+def compare_feature_values(a: Any, b: Any, tol: float = 1e-6) -> bool:
+    if isinstance(a, np.generic):
+        a = a.item()
+
+    if isinstance(b, np.generic):
+        b = b.item()
+
+    return approx_equal(a, b, tol=tol)
+
+
+def validate_build_climate_row(
+    features: dict[str, Any],
+    args,
+    resolved_mode: str,
+) -> list[str]:
+    failures = []
+    has_target = resolved_mode == "train_mode"
+    expected_count = (
+        args.expected_feature_count_train
+        if has_target
+        else args.expected_feature_count_inference
+    )
+
+    if expected_count is not None and len(features) != expected_count:
+        failures.append(
+            f"feature_count={len(features)} != expected_feature_count={expected_count}"
+        )
+
+    required_keys = sprint3_required_feature_keys(include_target=has_target)
+    missing_keys = sorted(required_keys - set(features.keys()))
+
+    if missing_keys:
+        failures.append(
+            "missing_required_keys=" + ", ".join(missing_keys[:25])
+        )
+
+    if has_target and "t_max_x+1" not in features:
+        failures.append("train_mode missing t_max_x+1")
+
+    if not has_target and "t_max_x+1" in features:
+        failures.append("inference_mode must not include t_max_x+1")
+
+    ciudad = features.get("ciudad")
+    if not isinstance(ciudad, str) or ciudad.strip().lower() != args.city.strip().lower():
+        failures.append(f"ciudad invalid: {ciudad!r}")
+
+    season = features.get("season")
+    month = features.get("month")
+    month_to_season = {
+        12: "winter",
+        1: "winter",
+        2: "winter",
+        3: "spring",
+        4: "spring",
+        5: "spring",
+        6: "summer",
+        7: "summer",
+        8: "summer",
+        9: "autumn",
+        10: "autumn",
+        11: "autumn",
+    }
+
+    if is_null(month):
+        failures.append(f"month invalid: {month!r}")
+    else:
+        month_int = int(month)
+        if month_int not in month_to_season:
+            failures.append(f"month invalid: {month!r}")
+        elif season != month_to_season[month_int]:
+            failures.append(f"season/month mismatch: season={season!r} month={month!r}")
+
+    null_allowed = strict_allowed_missing_keys()
+    if args.strict:
+        unexpected_nulls = sorted(
+            key
+            for key, value in features.items()
+            if is_null(value) and key not in {"season", "ciudad"} and key not in null_allowed
+        )
+        if unexpected_nulls:
+            failures.append(
+                "unexpected_nulls=" + ", ".join(unexpected_nulls[:25])
+            )
+
+    if not any(is_null(features.get(k)) for k in ["DTR_so_far_23h_x", "Tmax_so_far_23h_x", "Tmin_so_far_23h_x"]):
+        expected = float(features["Tmax_so_far_23h_x"]) - float(features["Tmin_so_far_23h_x"])
+        if not approx_equal(features["DTR_so_far_23h_x"], expected):
+            failures.append("DTR_so_far_23h_x invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["Temp_range_00_23h_x", "Tmax_so_far_23h_x", "Tmin_so_far_23h_x"]):
+        expected = float(features["Tmax_so_far_23h_x"]) - float(features["Tmin_so_far_23h_x"])
+        if not approx_equal(features["Temp_range_00_23h_x"], expected):
+            failures.append("Temp_range_00_23h_x invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["Temp_dewpoint_spread_23h", "Temp_23h_x", "Td_23h_x"]):
+        expected = float(features["Temp_23h_x"]) - float(features["Td_23h_x"])
+        if not approx_equal(features["Temp_dewpoint_spread_23h"], expected):
+            failures.append("Temp_dewpoint_spread_23h invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["tmax_anomaly_x", "Tmax_so_far_23h_x", "climatology_tmax_doy"]):
+        expected = float(features["Tmax_so_far_23h_x"]) - float(features["climatology_tmax_doy"])
+        if not approx_equal(features["tmax_anomaly_x"], expected):
+            failures.append("tmax_anomaly_x invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["tmax_anomaly_vs_doy_plus1", "Tmax_so_far_23h_x", "climatology_tmax_doy_plus1"]):
+        expected = float(features["Tmax_so_far_23h_x"]) - float(features["climatology_tmax_doy_plus1"])
+        if not approx_equal(features["tmax_anomaly_vs_doy_plus1"], expected):
+            failures.append("tmax_anomaly_vs_doy_plus1 invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["climatology_tmax_delta_doy_plus1_minus_x", "climatology_tmax_doy_plus1", "climatology_tmax_doy"]):
+        expected = (
+            float(features["climatology_tmax_doy_plus1"])
+            - float(features["climatology_tmax_doy"])
+        )
+        if not approx_equal(features["climatology_tmax_delta_doy_plus1_minus_x"], expected):
+            failures.append("climatology_tmax_delta_doy_plus1_minus_x invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["wind_u", "WindSpd_23h_x", "WindDir_sin_23h_x"]):
+        expected = float(features["WindSpd_23h_x"]) * float(features["WindDir_sin_23h_x"])
+        if not approx_equal(features["wind_u"], expected):
+            failures.append("wind_u invariant failed")
+
+    if not any(is_null(features.get(k)) for k in ["wind_v", "WindSpd_23h_x", "WindDir_cos_23h_x"]):
+        expected = float(features["WindSpd_23h_x"]) * float(features["WindDir_cos_23h_x"])
+        if not approx_equal(features["wind_v"], expected):
+            failures.append("wind_v invariant failed")
+
+    precip_sum = features.get("Precip_sum_00_23h_x")
+    precip_flag = features.get("Precip_flag_00_23h")
+    if not is_null(precip_sum) and not is_null(precip_flag):
+        expected = 1.0 if float(precip_sum) > 0 else 0.0
+        if not approx_equal(precip_flag, expected):
+            failures.append("Precip_flag_00_23h invariant failed")
+
+    for cyclical_a, cyclical_b, label in [
+        ("doy_sin", "doy_cos", "doy"),
+        ("month_sin", "month_cos", "month"),
+    ]:
+        a = features.get(cyclical_a)
+        b = features.get(cyclical_b)
+        if not is_null(a) and not is_null(b):
+            radius = (float(a) ** 2) + (float(b) ** 2)
+            if not math.isclose(radius, 1.0, rel_tol=1e-5, abs_tol=1e-5):
+                failures.append(f"{label}_sin_cos invariant failed")
+
+    for binary_key in ["extreme_heat_flag", "extreme_cold_flag", "Precip_flag_00_23h"]:
+        value = features.get(binary_key)
+        if not is_null(value) and value not in {0, 0.0, 1, 1.0}:
+            failures.append(f"{binary_key} must be binary, got {value!r}")
+
+    return failures
+
+
+def run_train_inference_parity_check(
+    fn,
+    args,
+    dates: list[date],
+) -> dict[str, Any]:
+    if not args.run_train_inference_parity_check:
+        return {
+            "checked": 0,
+            "failures": 0,
+            "failure_examples": [],
+            "errors": [],
+        }
+
+    check_dates = dates[:max(0, min(args.train_inference_check_samples, len(dates)))]
+    train_kwargs = build_weather_kwargs(
+        args=args,
+        fn=fn,
+        mode="train_mode",
+        include_target=True,
+    )
+    inference_kwargs = build_weather_kwargs(
+        args=args,
+        fn=fn,
+        mode="inference_mode",
+        include_target=False,
+    )
+
+    failures = []
+    errors = []
+
+    for d in check_dates:
+        ds = date_to_function_str(d, args.date_format)
+
+        train_features, _, _, train_error_type, train_error_msg = call_with_retry(
+            fn=fn,
+            city=args.city,
+            date_str=ds,
+            kwargs=train_kwargs,
+            max_retries=args.max_retries,
+            backoff_base_sec=args.backoff_base_sec,
+            backoff_jitter_sec=args.backoff_jitter_sec,
+        )
+        inference_features, _, _, inference_error_type, inference_error_msg = call_with_retry(
+            fn=fn,
+            city=args.city,
+            date_str=ds,
+            kwargs=inference_kwargs,
+            max_retries=args.max_retries,
+            backoff_base_sec=args.backoff_base_sec,
+            backoff_jitter_sec=args.backoff_jitter_sec,
+        )
+
+        if train_error_type or inference_error_type:
+            errors.append({
+                "date": d.isoformat(),
+                "train_error_type": train_error_type,
+                "train_error_msg": train_error_msg,
+                "inference_error_type": inference_error_type,
+                "inference_error_msg": inference_error_msg,
+            })
+            continue
+
+        if not isinstance(train_features, dict) or not isinstance(inference_features, dict):
+            failures.append({
+                "date": d.isoformat(),
+                "reason": "non_dict_return",
+            })
+            continue
+
+        if bool(train_features) != bool(inference_features):
+            failures.append({
+                "date": d.isoformat(),
+                "reason": "train_inference_success_mismatch",
+            })
+            continue
+
+        if not train_features and not inference_features:
+            continue
+
+        if is_build_climate_contract_target(args):
+            train_contract_failures = validate_build_climate_row(
+                features={str(k): v for k, v in train_features.items()},
+                args=args,
+                resolved_mode="train_mode",
+            )
+            inference_contract_failures = validate_build_climate_row(
+                features={str(k): v for k, v in inference_features.items()},
+                args=args,
+                resolved_mode="inference_mode",
+            )
+
+            if train_contract_failures or inference_contract_failures:
+                failures.append({
+                    "date": d.isoformat(),
+                    "reason": "mode_specific_contract_failure",
+                    "train_failures": train_contract_failures[:20],
+                    "inference_failures": inference_contract_failures[:20],
+                })
+                continue
+
+        train_keys_without_target = set(train_features.keys()) - {"t_max_x+1"}
+        inference_keys = set(inference_features.keys())
+
+        if train_keys_without_target != inference_keys:
+            failures.append({
+                "date": d.isoformat(),
+                "reason": "schema_mismatch_after_target_removal",
+                "train_only": sorted(train_keys_without_target - inference_keys)[:20],
+                "inference_only": sorted(inference_keys - train_keys_without_target)[:20],
+            })
+            continue
+
+        value_mismatches = []
+        for key in sorted(inference_keys):
+            if not compare_feature_values(train_features.get(key), inference_features.get(key)):
+                value_mismatches.append(key)
+                if len(value_mismatches) >= 20:
+                    break
+
+        if value_mismatches:
+            failures.append({
+                "date": d.isoformat(),
+                "reason": "value_mismatch",
+                "keys": value_mismatches,
+            })
+
+    return {
+        "checked": len(check_dates),
+        "failures": len(failures),
+        "failure_examples": failures[:10],
+        "errors": errors[:10],
+    }
+
+
 # ----------------------------
 # Reportes
 # ----------------------------
@@ -612,6 +1039,8 @@ def flatten_rows(records: list[dict[str, Any]], all_feature_keys: list[str]) -> 
             "feature_count": rec["feature_count"],
             "null_count": rec["null_count"],
             "non_finite_numeric_count": rec["non_finite_numeric_count"],
+            "strict_failure_count": rec.get("strict_failure_count", 0),
+            "strict_failures_json": rec.get("strict_failures_json"),
         }
 
         features = rec.get("features") or {}
@@ -660,6 +1089,8 @@ def main() -> int:
     ap.add_argument("--compute-td-anomaly", type=str2bool, default=True)
     ap.add_argument("--run-inference-leakage-check", type=str2bool, default=True)
     ap.add_argument("--inference-check-samples", type=int, default=10)
+    ap.add_argument("--run-train-inference-parity-check", type=str2bool, default=True)
+    ap.add_argument("--train-inference-check-samples", type=int, default=10)
 
     ap.add_argument("--sleep-between-calls-sec", type=float, default=0.15)
     ap.add_argument("--max-retries", type=int, default=5)
@@ -675,6 +1106,9 @@ def main() -> int:
     ap.add_argument("--max-error-ratio", type=float, default=0.10)
     ap.add_argument("--allow-schema-variance", action="store_true")
     ap.add_argument("--allow-non-finite", action="store_true")
+    ap.add_argument("--enforce-build-climate-contract", type=str2bool, default=True)
+    ap.add_argument("--expected-feature-count-train", type=int, default=133)
+    ap.add_argument("--expected-feature-count-inference", type=int, default=132)
 
     args = ap.parse_args()
 
@@ -711,6 +1145,7 @@ def main() -> int:
 
     records: list[dict[str, Any]] = []
     success_feature_dicts: list[dict[str, Any]] = []
+    strict_contract_failures: list[dict[str, Any]] = []
 
     durations = []
     durations_success = []
@@ -719,6 +1154,8 @@ def main() -> int:
 
     error_counts = Counter()
     schema_counts = Counter()
+    resolved_mode = normalize_feature_mode(args.mode, args.include_target)
+    build_contract_target = is_build_climate_contract_target(args)
 
     first_ok: date | None = None
     last_ok: date | None = None
@@ -752,6 +1189,7 @@ def main() -> int:
         null_count = 0
         non_finite_numeric_count = 0
         schema_hash = None
+        strict_row_failures: list[str] = []
 
         if error_type is not None:
             error_counts[error_type] += 1
@@ -788,6 +1226,19 @@ def main() -> int:
                 schema_hash = schema_signature(list(features.keys()))
                 schema_counts[schema_hash] += 1
 
+                if build_contract_target:
+                    strict_row_failures = validate_build_climate_row(
+                        features=features,
+                        args=args,
+                        resolved_mode=resolved_mode,
+                    )
+                    if strict_row_failures:
+                        strict_contract_failures.append({
+                            "date": d.isoformat(),
+                            "date_str": ds,
+                            "failures": strict_row_failures,
+                        })
+
         records.append({
             "date": d.isoformat(),
             "date_str": ds,
@@ -802,6 +1253,8 @@ def main() -> int:
             "feature_count": feature_count,
             "null_count": null_count,
             "non_finite_numeric_count": non_finite_numeric_count,
+            "strict_failure_count": len(strict_row_failures),
+            "strict_failures_json": json.dumps(strict_row_failures, ensure_ascii=False),
             "features": features if isinstance(features, dict) else None,
         })
 
@@ -893,6 +1346,20 @@ def main() -> int:
         args=args,
         dates=dates,
     )
+    train_inference_parity_check = run_train_inference_parity_check(
+        fn=fn,
+        args=args,
+        dates=dates,
+    )
+    strict_contract_df = pd.DataFrame([
+        {
+            "date": rec["date"],
+            "date_str": rec["date_str"],
+            "failure_count": len(rec["failures"]),
+            "failures_json": json.dumps(rec["failures"], ensure_ascii=False),
+        }
+        for rec in strict_contract_failures
+    ])
 
     summary = {
         "module": args.module,
@@ -903,6 +1370,7 @@ def main() -> int:
         "date_format": args.date_format,
         "strict": args.strict,
         "mode": args.mode,
+        "resolved_mode": resolved_mode,
         "include_target": args.include_target,
         "history_start": args.history_start.isoformat(),
         "execution_hour": args.execution_hour,
@@ -911,6 +1379,9 @@ def main() -> int:
         "min_climatology_records": args.min_climatology_records,
         "compute_td_anomaly": args.compute_td_anomaly,
         "function_kwargs": function_kwargs,
+        "enforce_build_climate_contract": build_contract_target,
+        "expected_feature_count_train": args.expected_feature_count_train,
+        "expected_feature_count_inference": args.expected_feature_count_inference,
         "samples_total": total,
         "ok_returns": ok_count,
         "empty_returns": empty_count,
@@ -934,6 +1405,8 @@ def main() -> int:
         "non_finite_numeric_total": int(len(non_finite_df)),
         "target_like_key_count": int(len(target_like_df)) if not target_like_df.empty else 0,
         "inference_leakage_check": inference_leakage_check,
+        "train_inference_parity_check": train_inference_parity_check,
+        "strict_contract_failure_count": len(strict_contract_failures),
         "seed": args.seed,
         "sampling_no_replacement": args.no_replacement,
     }
@@ -948,6 +1421,7 @@ def main() -> int:
     errors_df.to_csv(out_dir / "feature_test_errors.csv", index=False)
     non_finite_df.to_csv(out_dir / "feature_test_non_finite.csv", index=False)
     target_like_df.to_csv(out_dir / "feature_test_target_like_keys.csv", index=False)
+    strict_contract_df.to_csv(out_dir / "feature_test_strict_contract_failures.csv", index=False)
 
     pd.DataFrame({
         "date": [d.isoformat() for d in dates],
@@ -1004,6 +1478,13 @@ def main() -> int:
     else:
         print("No target-like keys detected.")
 
+    print("\n=== STRICT CONTRACT FAILURES ===")
+    if not strict_contract_df.empty:
+        for _, row in strict_contract_df.head(10).iterrows():
+            print(f"{row['date']} | failures={row['failures_json']}")
+    else:
+        print("No strict contract failures.")
+
     print("\nArchivos generados:")
     for filename in [
         "feature_test_rows.csv",
@@ -1013,6 +1494,7 @@ def main() -> int:
         "feature_test_errors.csv",
         "feature_test_non_finite.csv",
         "feature_test_target_like_keys.csv",
+        "feature_test_strict_contract_failures.csv",
         "feature_test_dates_used.csv",
     ]:
         print(f"- {out_dir / filename}")
@@ -1052,6 +1534,21 @@ def main() -> int:
     if inference_leakage_check.get("failures", 0) > 0:
         failures.append(
             "inference_mode devolvió el target oficial t_max_x+1."
+        )
+
+    if train_inference_parity_check.get("errors"):
+        failures.append(
+            "train_inference_parity_check no pudo completarse sin errores."
+        )
+
+    if train_inference_parity_check.get("failures", 0) > 0:
+        failures.append(
+            "train_inference_parity_check detectó diferencias entre train_mode e inference_mode."
+        )
+
+    if build_contract_target and strict_contract_failures:
+        failures.append(
+            f"strict_contract_failure_count={len(strict_contract_failures)} > 0."
         )
 
     if failures:

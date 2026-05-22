@@ -3,4 +3,12 @@ result.txt
 prompt.txt
 estructura.txt
 *.pyc
-*cache*
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.weather_cache/
+**/.weather_cache/
+*.cache
+*cache*/
+test-reports/
