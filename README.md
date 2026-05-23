@@ -5832,19 +5832,7 @@ Auditoria de utilidad para entrenamiento (escala 1-10):
 
 
 
-# Desarrollo de V1
 
-![Versión 1 image](./docs/assets/v1.png)
-
-# Desarrollo de V2
-
-![Versión 2 image](./docs/assets/v2.png)
-
-# Desarrollo de V3
-
-![Versión 3 image](./docs/assets/v3.png)
-
-# Sprint 3 - V0
 
 <details open>
 <summary><strong>Configuracion de entrenamiento</strong></summary>
@@ -6028,3 +6016,17 @@ Lectura rapida:
 - Se mantuvieron controles anti-leakage: split temporal estricto, transforms ajustadas por fold y exclusion de `date`, `date_str`, `year` y target en features.
 
 </details>
+
+
+
+# Desarrollo de V1
+
+![Versión 1 image](./docs/assets/v1.png)
+
+# Desarrollo de V2
+
+![Versión 2 image](./docs/assets/v2.png)
+
+# Desarrollo de V3
+
+![Versión 3 image](./docs/assets/v3.png)
