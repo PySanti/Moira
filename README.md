@@ -11,7 +11,7 @@ El objetivo de este proyecto es crear un bot que se conectará con Polymarket pa
 
 # Desarrollo de V0
 
-![Versión 0 image](./images/v0.png)
+![Versión 0 image](./docs/assets/v0.png)
 
 # Definición modular de requisitos para V0
 
@@ -408,13 +408,13 @@ La función fue testeada para:
 <summary><strong>Generación de dataset 1.0</strong></summary>
 
 
-Luego de minar datos de 1980 a 2026 utilizando el script `./utils/miner.py`, obtuvimos los siguientes resultados:
+Luego de minar datos de 1980 a 2026 utilizando el script `./src/moira/data/miner.py`, obtuvimos los siguientes resultados:
 
 ```
 Dimensiones de dataset 15118 x  21
 ```
 
-Posteriormente, se generó el valset utilizando registros de otoño a través del script `./utils/split_dataset.py`, obteniendo los siguientes resultados:
+Posteriormente, se generó el valset utilizando registros de otoño a través del script `./src/moira/data/split_dataset.py`, obteniendo los siguientes resultados:
 
 ```
 Dimensiones de train 11392 x  21
@@ -526,8 +526,8 @@ def split_xy(df: pd.DataFrame, target_col: str, drop_cols: List[str]) -> Tuple[p
 # -------------------- Main --------------------
 
 def main():
-    train_path = Path("./dataset/trainset.csv")
-    val_path = Path("./dataset/valset.csv")
+    train_path = Path("./data/processed/sprint1/autumn_split/trainset.csv")
+    val_path = Path("./data/processed/sprint1/autumn_split/valset.csv")
 
     df_train = pd.read_csv(train_path)
     df_val = pd.read_csv(val_path)
@@ -763,7 +763,7 @@ def split_xy(df: pd.DataFrame, target_col: str, drop_cols: List[str]) -> Tuple[p
 # -------------------- Main --------------------
 
 def main():
-    dataset = Path("../../dataset/original_dataset.csv")
+    dataset = Path("../../data/processed/sprint1/original_dataset.csv")
 
     # ✅ Leer dataset original
     df = pd.read_csv(dataset)
@@ -1005,7 +1005,7 @@ def split_xy(df: pd.DataFrame, target_col: str, drop_cols: List[str]) -> Tuple[p
 # -------------------- Main --------------------
 
 def main():
-    dataset = Path("../../dataset/original_dataset.csv")
+    dataset = Path("../../data/processed/sprint1/original_dataset.csv")
 
     # ✅ Leer dataset original
     df = pd.read_csv(dataset)
@@ -1234,7 +1234,7 @@ Actualmente, los valores de las features se obtienen de la siguiente forma:
 
 El problema es que obtener data de fuentes/sensores diferentes puede provocar un desalineamiento entre feature y targets, por lo cual, lo mejor es obtener todos los valores de la misma estacion (no necesariamente misma fuente).
 
-Teniendo en cuenta lo anterior, se modifico el modulo `./utils/build_climate_data.py` para obtener todos los datos de la misma estacion: el aeropuerto LaGuardia de NY.
+Teniendo en cuenta lo anterior, se modifico el modulo `./src/moira/features/build_climate_data.py` para obtener todos los datos de la misma estacion: el aeropuerto LaGuardia de NY.
 
 
 ```python
@@ -5189,7 +5189,7 @@ El entrenamiento de `V0-SPRINT 2 / train_1.1` muestra una mejora clara sobre bas
 Archivo usado:
 
 ```text
-./dataset/sprint2.csv
+./data/processed/sprint2.csv
 ```
 
 Metadata relevante del entrenamiento:
@@ -5230,7 +5230,7 @@ Esto evita que registros futuros contaminen métricas pasadas.
 Archivo:
 
 ```text
-./training/v0-sprint2/train_1.1/main.py
+./experiments/v0-sprint2/train_1.1/main.py
 ```
 
 El módulo entrena un modelo tabular usando `scikit-learn`:
@@ -5326,7 +5326,7 @@ Comparación contra baselines simples en test:
 
 ### MAE de validación por año
 
-![MAE de validación por año](./training/v0-sprint2/train_1.1/plots/validation_mae_by_year.png)
+![MAE de validación por año](./experiments/v0-sprint2/train_1.1/plots/validation_mae_by_year.png)
 
 Lectura:
 
@@ -5336,7 +5336,7 @@ Lectura:
 
 ### MAE por temporada
 
-![MAE por temporada](./training/v0-sprint2/train_1.1/plots/mae_by_season.png)
+![MAE por temporada](./experiments/v0-sprint2/train_1.1/plots/mae_by_season.png)
 
 Lectura:
 
@@ -5346,7 +5346,7 @@ Lectura:
 
 ### Test: real vs predicción
 
-![Test real vs predicción](./training/v0-sprint2/train_1.1/plots/test_actual_vs_predicted.png)
+![Test real vs predicción](./experiments/v0-sprint2/train_1.1/plots/test_actual_vs_predicted.png)
 
 Lectura:
 
@@ -5356,7 +5356,7 @@ Lectura:
 
 ### Test: serie temporal real vs predicha
 
-![Test serie temporal real vs predicha](./training/v0-sprint2/train_1.1/plots/test_timeseries_actual_vs_predicted.png)
+![Test serie temporal real vs predicha](./experiments/v0-sprint2/train_1.1/plots/test_timeseries_actual_vs_predicted.png)
 
 Lectura:
 
@@ -5366,7 +5366,7 @@ Lectura:
 
 ### Distribución de errores
 
-![Distribución de errores](./training/v0-sprint2/train_1.1/plots/error_distribution.png)
+![Distribución de errores](./experiments/v0-sprint2/train_1.1/plots/error_distribution.png)
 
 Lectura:
 
@@ -5408,7 +5408,7 @@ Lectura:
 
 SPRINT 3-v0 parte de la conclusion de SPRINT 2: el modelo ya esta construido con fuentes consistentes de LaGuardia y respeta el corte **as-of 23h del dia X**, pero todavia le falta informacion sobre la dinamica atmosferica que conecta el cierre del dia X con la maxima de X+1.
 
-El foco de este sprint es enriquecer `./utils/build_climate_data.py` sin cambiar la definicion del target:
+El foco de este sprint es enriquecer `./src/moira/features/build_climate_data.py` sin cambiar la definicion del target:
 
 - Mantener todas las features de SPRINT 2.
 - Agregar senales intradia disponibles antes o exactamente a las 23h de X.
@@ -5455,7 +5455,7 @@ La nueva version conserva el esquema anterior y agrega **95 features**. En `trai
 Archivo modificado:
 
 ```text
-./utils/build_climate_data.py
+./src/moira/features/build_climate_data.py
 ```
 
 Cambios principales:
@@ -5501,12 +5501,12 @@ Cambios principales:
 Archivo modificado:
 
 ```text
-./utils/test.py
+./tests/contract/test_feature_contract.py
 ```
 
 Cambios principales:
 
-- El modulo por defecto ahora es `utils.build_climate_data`, pero mantiene fallback para importar `build_climate_data` desde `utils`.
+- El modulo por defecto ahora es `moira.features.build_climate_data`, pero mantiene fallback para importar `build_climate_data`.
 - Se agregaron parametros del contrato nuevo:
 
 ```text
@@ -5529,8 +5529,8 @@ Cambios principales:
 Comando recomendado para Sprint 3-v0:
 
 ```bash
-python3 utils/test.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python3 -m tests.contract.test_feature_contract \
+  --module moira.features.build_climate_data \
   --function get_weather_features \
   --city "new york" \
   --start 1983-01-01 \
@@ -5540,7 +5540,7 @@ python3 utils/test.py \
   --mode train_mode \
   --nearest-tolerance-hours 6 \
   --history-start 1980-01-01 \
-  --out-dir ./test-reports/sprint3-v0/feature_contract_test
+  --out-dir ./reports/contract-tests/sprint3-v0/feature_contract_test
 ```
 
 </details>
@@ -5563,7 +5563,7 @@ Para entrenamiento se sigue necesitando `scikit-learn`, como en SPRINT 2. El int
 <details>
 <summary><strong>Problemas identificados</strong></summary>
 
-Esta seccion resume riesgos detectados en la integracion entre `utils/build_climate_data.py` (feature builder), `utils/miner.py` (generacion de dataset) y `utils/test.py` (contrato y auditoria).
+Esta seccion resume riesgos detectados en la integracion entre `src/moira/features/build_climate_data.py` (feature builder), `src/moira/data/miner.py` (generacion de dataset) y `tests/contract/test_feature_contract.py` (contrato y auditoria).
 
 | Riesgo | Modulos | Sintoma | Impacto | Prob. | Sev. | Mitigacion recomendada | Cobertura build | Evidencia / Nota |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -5572,7 +5572,7 @@ Esta seccion resume riesgos detectados en la integracion entre `utils/build_clim
 | Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | [x] | Cubierto en builder y test: `test.py` consume `FEATURE_COUNT_*`, `FEATURE_TARGET_KEY`, `FEATURE_ALLOWED_*` con fallback para modulos genericos. |
 | Inconsistencia de formato de fecha (`date_str`) | build_climate_data + miner + test | El builder espera `%d-%m-%y`; ejecuciones directas con ISO fallan o generan fechas incorrectas | Errores de ejecucion o mineria con fechas desplazadas | Media | Media | Estandarizar input a ISO en CLI (`miner.py`/`test.py`) y convertir en un solo lugar; documentar formato aceptado para llamadas directas | [x] | Cubierto en builder: parseo dual `%d-%m-%y` y `%Y-%m-%d`. |
 | Ciudad soportada efectivamente solo `new york` | build_climate_data + miner + test | `CITY_COORDS` expone varias ciudades pero el builder hard-fail fuera de `new york` | Confusion operativa: `miner.py`/`test.py` aceptan `--city` pero el builder no soporta varias estaciones | Alta | Media | Documentar explicitamente la limitacion actual y/o validar antes en CLI para fallar con mensaje claro | [x] | Cubierto en builder: `SUPPORTED_CITIES={"new york"}` y validacion explicita en ambos entrypoints. |
-| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | [x] | Cubierto en `miner.py`: se agrega fallback de `sys.path` basado en `__file__` para soportar script directo y modulo. |
+| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `PYTHONPATH=src python -m moira.data.miner ...` evita fallos de import y reduce dependencia de cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `PYTHONPATH=src python -m moira.data.miner ...` desde la raiz del repo | [x] | Cubierto en `miner.py`: se agrega fallback de `sys.path` para incluir `src` y raiz del repo. |
 | Cache local afecta reproducibilidad y el git status | build_climate_data + miner + test | `.weather_cache/` puede cambiar entre corridas; accidentalmente se versionan borrados/cambios | Dificulta comparar resultados y contamina diffs/PRs | Media | Media | Mantener `.weather_cache/` ignorado y controlar ubicacion via `WEATHER_CACHE_DIR` o deshabilitar con `WEATHER_DISABLE_DISK_CACHE=1` | [ ] | No cubierto en este ciclo: riesgo operativo/documental, no de logica principal del builder. |
 | Fallback de precipitacion puede sobrecontar (1h vs 6h) | build_climate_data + miner | Si se suman ventanas de 6h sin garantizar no solapamiento, `Precip_*` puede inflarse | Ruido sistematico en feature de precip; afecta entrenamiento | Baja | Media | Definir una unica estrategia (preferir 1h con umbral; si no, 6h sin sumar solapes) y cubrir con un test de consistencia | [x] | Cubierto en builder: fallback `Precip_6h` usa ultimo valor valido en vez de suma. |
 
@@ -5580,15 +5580,15 @@ Esta seccion resume riesgos detectados en la integracion entre `utils/build_clim
 
 # Desarrollo de V1
 
-![Versión 1 image](./images/v1.png)
+![Versión 1 image](./docs/assets/v1.png)
 
 # Desarrollo de V2
 
-![Versión 2 image](./images/v2.png)
+![Versión 2 image](./docs/assets/v2.png)
 
 # Desarrollo de V3
 
-![Versión 3 image](./images/v3.png)
+![Versión 3 image](./docs/assets/v3.png)
 
 <details open>
 <summary><strong>Ultimos cambios aplicados (build_climate_data)</strong></summary>
@@ -5596,7 +5596,7 @@ Esta seccion resume riesgos detectados en la integracion entre `utils/build_clim
 Archivo modificado:
 
 ```text
-./utils/build_climate_data.py
+./src/moira/features/build_climate_data.py
 ```
 
 Cambios implementados:
@@ -5626,10 +5626,10 @@ Cambios implementados:
 Validacion ejecutada despues de los cambios:
 
 ```bash
-python -m py_compile utils/build_climate_data.py
+python -m py_compile src/moira/features/build_climate_data.py
 
-python utils/test.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m tests.contract.test_feature_contract \
+  --module moira.features.build_climate_data \
   --function get_weather_features \
   --city "new york" \
   --start 1983-01-01 \
@@ -5639,10 +5639,10 @@ python utils/test.py \
   --mode train_mode \
   --nearest-tolerance-hours 6 \
   --history-start 1980-01-01 \
-  --out-dir ./test-reports/sprint3-v0/fix_validation_train_v2
+  --out-dir ./reports/contract-tests/sprint3-v0/fix_validation_train_v2
 
-python utils/test.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m tests.contract.test_feature_contract \
+  --module moira.features.build_climate_data \
   --function get_weather_features \
   --city "new york" \
   --start 1983-01-01 \
@@ -5653,7 +5653,7 @@ python utils/test.py \
   --include-target false \
   --nearest-tolerance-hours 6 \
   --history-start 1980-01-01 \
-  --out-dir ./test-reports/sprint3-v0/fix_validation_inference_v2
+  --out-dir ./reports/contract-tests/sprint3-v0/fix_validation_inference_v2
 ```
 
 Resultados observados:
@@ -5661,7 +5661,7 @@ Resultados observados:
 - `ok_returns=120` y `empty_returns=0` en train e inference para la muestra de 120 fechas.
 - `feature_union_count=133` en `train_mode` y `feature_union_count=132` en `inference_mode`.
 - `target_like_key_count=0` en inferencia (sin leakage del target).
-- En `utils/test.py` ya no persisten `strict_contract_failure_count` por desalineacion de nulls permitidos; ahora sincroniza contrato desde el builder con fallback seguro.
+- En `tests/contract/test_feature_contract.py` ya no persisten `strict_contract_failure_count` por desalineacion de nulls permitidos; ahora sincroniza contrato desde el builder con fallback seguro.
 
 </details>
 
@@ -5671,11 +5671,11 @@ Resultados observados:
 Archivos modificados:
 
 ```text
-./utils/test.py
-./utils/miner.py
+./tests/contract/test_feature_contract.py
+./src/moira/data/miner.py
 ```
 
-Cambios implementados en `utils/test.py`:
+Cambios implementados en `tests/contract/test_feature_contract.py`:
 
 1. `load_function(...)` ahora retorna modulo y funcion para resolver contrato exportado.
 2. Se agrego `resolve_contract_config(...)` con prioridad: CLI explicito > constantes `FEATURE_*` del modulo > fallback local.
@@ -5684,9 +5684,9 @@ Cambios implementados en `utils/test.py`:
 5. Se sincronizaron conteos esperados por modo con `FEATURE_COUNT_TRAIN_MODE` / `FEATURE_COUNT_INFERENCE_MODE`.
 6. El `summary` ahora reporta `contract_source`, `contract_version`, `contract_target_key` y politica efectiva.
 
-Cambios implementados en `utils/miner.py`:
+Cambios implementados en `src/moira/data/miner.py`:
 
-1. Import robusto (`import_weather_module(..., script_file=__file__)`) con insercion defensiva de rutas para soportar `python utils/miner.py ...` y `python -m utils.miner ...`.
+1. Import robusto (`import_weather_module(..., script_file=__file__)`) con insercion defensiva de rutas para soportar `PYTHONPATH=src python -m moira.data.miner ...`.
 2. `--dry-run true` ahora evita side effects (sin backups, sin preload y sin escrituras); opcion `--dry-run-probe` para smoke controlado.
 3. Validacion temprana de ciudad con `SUPPORTED_CITIES` cuando el modulo la exporta.
 4. Metadata enriquecida con contrato y cache (`builder_metadata`, `cache_info_after`, firma y kwargs efectivos).
@@ -5696,10 +5696,10 @@ Cambios implementados en `utils/miner.py`:
 Validacion ejecutada:
 
 ```bash
-python -m py_compile utils/test.py utils/miner.py utils/build_climate_data.py
+python -m py_compile tests/contract/test_feature_contract.py src/moira/data/miner.py src/moira/features/build_climate_data.py
 
-python utils/test.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m tests.contract.test_feature_contract \
+  --module moira.features.build_climate_data \
   --function get_weather_features \
   --city "new york" \
   --start 1983-01-01 \
@@ -5709,10 +5709,10 @@ python utils/test.py \
   --mode train_mode \
   --nearest-tolerance-hours 6 \
   --history-start 1980-01-01 \
-  --out-dir ./test-reports/sprint3-v0/test_miner_fix_train
+  --out-dir ./reports/contract-tests/sprint3-v0/test_miner_fix_train
 
-python utils/test.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m tests.contract.test_feature_contract \
+  --module moira.features.build_climate_data \
   --function get_weather_features \
   --city "new york" \
   --start 1983-01-01 \
@@ -5723,10 +5723,10 @@ python utils/test.py \
   --include-target false \
   --nearest-tolerance-hours 6 \
   --history-start 1980-01-01 \
-  --out-dir ./test-reports/sprint3-v0/test_miner_fix_inference
+  --out-dir ./reports/contract-tests/sprint3-v0/test_miner_fix_inference
 
-python utils/miner.py \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m moira.data.miner \
+  --module moira.features.build_climate_data \
   --city "new york" \
   --start 1983-01-01 \
   --end 1983-01-10 \
@@ -5734,8 +5734,8 @@ python utils/miner.py \
   --dry-run true \
   --limit 5
 
-python -m utils.miner \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m moira.data.miner \
+  --module moira.features.build_climate_data \
   --city "new york" \
   --start 1983-01-01 \
   --end 1983-01-10 \
@@ -5743,15 +5743,15 @@ python -m utils.miner \
   --dry-run true \
   --limit 5
 
-python -m utils.miner \
-  --module utils.build_climate_data \
+PYTHONPATH=src python -m moira.data.miner \
+  --module moira.features.build_climate_data \
   --city "new york" \
   --start 1983-01-01 \
   --end 1983-01-10 \
   --history-start 1980-01-01 \
-  --output ./test-reports/sprint3-v0/miner_fix/dataset.csv \
-  --failed-output ./test-reports/sprint3-v0/miner_fix/failed_rows.csv \
-  --metadata-output ./test-reports/sprint3-v0/miner_fix/metadata.json \
+  --output ./reports/contract-tests/sprint3-v0/miner_fix/dataset.csv \
+  --failed-output ./reports/contract-tests/sprint3-v0/miner_fix/failed_rows.csv \
+  --metadata-output ./reports/contract-tests/sprint3-v0/miner_fix/metadata.json \
   --strict true \
   --preload true \
   --nearest-tolerance-hours 6 \
@@ -5761,9 +5761,9 @@ python -m utils.miner \
 
 Resultados observados:
 
-- `utils/test.py` train: `ok_returns=120`, `empty_returns=0`, `feature_union_count=133`, `strict_contract_failure_count=0`.
-- `utils/test.py` inference: `ok_returns=120`, `empty_returns=0`, `feature_union_count=132`, `target_like_key_count=0`, `strict_contract_failure_count=0`.
-- `utils/miner.py --dry-run true` y `python -m utils.miner --dry-run true` ejecutan sin errores de import y sin side effects.
+- `tests/contract/test_feature_contract.py` train: `ok_returns=120`, `empty_returns=0`, `feature_union_count=133`, `strict_contract_failure_count=0`.
+- `tests/contract/test_feature_contract.py` inference: `ok_returns=120`, `empty_returns=0`, `feature_union_count=132`, `target_like_key_count=0`, `strict_contract_failure_count=0`.
+- `PYTHONPATH=src python -m moira.data.miner --dry-run true` ejecuta sin errores de import y sin side effects.
 - Corrida corta real de `miner`: `processed=10`, `ok_new_records=10`, `errors_total=0`, `schema_mismatch_count=0`.
 
 </details>

@@ -1,0 +1,102 @@
+{
+  "run_id": "20260523T105501",
+  "module": "utils.build_climate_data",
+  "function": "get_weather_features",
+  "city": "new york",
+  "start": "1983-01-01",
+  "end": "1983-01-10",
+  "history_start": "1980-01-01",
+  "date_format": "%d-%m-%y",
+  "strict": true,
+  "preload": true,
+  "preload_info": {
+    "elapsed_sec": 0.016085499999462627,
+    "result": {
+      "ncei_daily_year_cache": 4,
+      "isd_lite_raw_year_cache": 0,
+      "isd_lite_processed_year_cache": 5,
+      "isd_daily_23h_year_cache": 4,
+      "disk_cache_enabled": true,
+      "disk_cache_dir": ".weather_cache"
+    }
+  },
+  "skip_existing": false,
+  "output": "test-reports\\sprint3-v0\\miner_fix\\dataset.csv",
+  "failed_output": "test-reports\\sprint3-v0\\miner_fix\\failed_rows.csv",
+  "existing_rows_before": 0,
+  "total_rows_after": 10,
+  "total_dates_in_range": 10,
+  "dates_to_process": 10,
+  "processed": 10,
+  "ok_new_records": 10,
+  "empty_returns": 0,
+  "errors_total": 0,
+  "schema_mismatch_count": 0,
+  "ok_ratio": 1.0,
+  "empty_ratio": 0.0,
+  "error_ratio": 0.0,
+  "schema_mismatch_ratio": 0.0,
+  "skipped_existing": 0,
+  "error_counts": {},
+  "schema_counts": {
+    "3a8d9c6af65bd6a5": 10
+  },
+  "failed_by_year": {},
+  "failed_by_month": {},
+  "failed_by_temporal_bucket": {},
+  "attempts_mean": 1.0,
+  "backoff_slept_total_sec": 0.0,
+  "elapsed_sec": 0.26011319999997795,
+  "rows_per_second": 38.44480018699877,
+  "get_weather_features_kwargs": {
+    "strict": true,
+    "execution_hour": 23,
+    "nearest_tolerance_hours": 6,
+    "history_start_date": "1980-01-01",
+    "climatology_window_days": 7,
+    "min_climatology_records": 30,
+    "compute_td_anomaly": true,
+    "include_target": true
+  },
+  "builder_metadata": {
+    "module_name": "utils.build_climate_data",
+    "module_file": "C:\\Users\\santi\\Desktop\\Proyectos\\Moira\\utils\\build_climate_data.py",
+    "feature_contract_version": "sprint3_v0",
+    "feature_count_train_mode": 133,
+    "feature_count_inference_mode": 132,
+    "feature_target_key": "t_max_x+1",
+    "feature_allowed_non_numeric": "{'ciudad', 'season'}",
+    "feature_allowed_missing": "{'wind_u', 'WindSpd_23h_ma3', 'Cloud_change_last_6h', 'Temp_change_23h_1d', 'Temp_18h_x', 'SLP_change_last_3h', 'Temp_slope_last_6h', 'WindDir_sin_23h_x', 'Temp_23h_trend_3d', 'Temp_change_last_6h', 'Cloud_23h_x', 'WindSpd_change_last_6h', 'Temp_change_23h_minus_06h', 'SLP_change_last_6h', 'wind_v', 'WindDir_cos_23h_x', 'HR_23h_ma3', 'Precip_positive_hours_last_6h', 'Temp_12h_x', 'Temp_change_last_12h', 'pressure_trend_3d', 'Temp_change_last_3h', 'Temp_change_23h_minus_18h', 'Temp_change_23h_minus_12h', 'Precip_positive_hours_00_23h', 'SLP_change_last_12h', 'td_anomaly_x', 'Temp_23h_ma3', 'Td_change_last_6h', 'Temp_slope_last_12h', 'HR_change_last_6h', 'Temp_21h_x', 'Temp_06h_x'}",
+    "supported_cities": "{'new york'}",
+    "default_nearest_tolerance_hours": 6,
+    "cache_info_before": {
+      "ncei_daily_year_cache": 0,
+      "isd_lite_raw_year_cache": 0,
+      "isd_lite_processed_year_cache": 0,
+      "isd_daily_23h_year_cache": 0,
+      "disk_cache_enabled": true,
+      "disk_cache_dir": ".weather_cache"
+    },
+    "get_weather_features_signature": "(city: 'str', date_str: 'str', strict: 'bool' = True, execution_hour: 'int' = 23, nearest_tolerance_hours: 'int' = 6, history_start_date: 'str' = '1980-01-01', climatology_window_days: 'int' = 7, min_climatology_records: 'int' = 30, compute_td_anomaly: 'bool' = True, mode: 'str' = 'train_mode', include_target: 'bool | None' = None) -> 'dict'",
+    "get_weather_features_kwargs_effective": {
+      "strict": true,
+      "execution_hour": 23,
+      "nearest_tolerance_hours": 6,
+      "history_start_date": "1980-01-01",
+      "climatology_window_days": 7,
+      "min_climatology_records": 30,
+      "compute_td_anomaly": true,
+      "include_target": true
+    }
+  },
+  "cache_info_after": {
+    "ncei_daily_year_cache": 4,
+    "isd_lite_raw_year_cache": 0,
+    "isd_lite_processed_year_cache": 5,
+    "isd_daily_23h_year_cache": 4,
+    "disk_cache_enabled": true,
+    "disk_cache_dir": ".weather_cache"
+  },
+  "allow_schema_variance": false,
+  "generated_at": "2026-05-23T10:55:01"
+}

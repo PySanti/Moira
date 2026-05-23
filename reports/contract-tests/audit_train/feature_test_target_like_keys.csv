@@ -1,0 +1,2 @@
+feature,presence_count,missing_count,presence_rate,null_count,non_null_count,null_rate_when_present,observed_types,type_count,numeric_non_finite_count,looks_like_target
+t_max_x+1,904,0,1.0,0,904,0.0,"{""float"": 904}",1,0,True
