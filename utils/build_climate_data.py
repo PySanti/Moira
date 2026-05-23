@@ -46,14 +46,54 @@ ISD_LITE_BASE_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-lite"
 
 CITY_COORDS = {
     "new york": {"lat": 40.7128, "lon": -74.0060, "tz": "America/New_York"},
-    "chicago":  {"lat": 41.8781, "lon": -87.6298, "tz": "America/Chicago"},
-    "atlanta":  {"lat": 33.7490, "lon": -84.3880, "tz": "America/New_York"},
-    "seul":     {"lat": 37.5665, "lon": 126.9780, "tz": "Asia/Seoul"},
-    "londres":  {"lat": 51.5074, "lon": -0.1278, "tz": "Europe/London"},
 }
 
 DEFAULT_HISTORY_START_DATE = "1980-01-01"
+DEFAULT_NEAREST_TOLERANCE_HOURS = 6
+SUPPORTED_CITIES = {"new york"}
 ISD_DAILY_23H_CACHE_VERSION = 2
+FEATURE_CONTRACT_VERSION = "sprint3_v0"
+FEATURE_COUNT_INFERENCE_MODE = 132
+FEATURE_COUNT_TRAIN_MODE = 133
+FEATURE_TARGET_KEY = "t_max_x+1"
+
+# Contrato interno de validacion (alineable con utils/test.py)
+FEATURE_ALLOWED_NON_NUMERIC = {"ciudad", "season"}
+FEATURE_ALLOWED_MISSING = {
+    "Cloud_23h_x",
+    "WindDir_sin_23h_x",
+    "WindDir_cos_23h_x",
+    "wind_u",
+    "wind_v",
+    "pressure_trend_3d",
+    "td_anomaly_x",
+    "Temp_06h_x",
+    "Temp_12h_x",
+    "Temp_18h_x",
+    "Temp_21h_x",
+    "Temp_change_23h_minus_18h",
+    "Temp_change_23h_minus_12h",
+    "Temp_change_23h_minus_06h",
+    "Temp_change_23h_1d",
+    "Temp_change_last_3h",
+    "Temp_change_last_6h",
+    "Temp_change_last_12h",
+    "Temp_slope_last_6h",
+    "Temp_slope_last_12h",
+    "Td_change_last_6h",
+    "HR_change_last_6h",
+    "SLP_change_last_3h",
+    "SLP_change_last_6h",
+    "SLP_change_last_12h",
+    "WindSpd_change_last_6h",
+    "Cloud_change_last_6h",
+    "Precip_positive_hours_00_23h",
+    "Precip_positive_hours_last_6h",
+    "Temp_23h_ma3",
+    "Temp_23h_trend_3d",
+    "HR_23h_ma3",
+    "WindSpd_23h_ma3",
+}
 
 # Cache persistente.
 # Puedes cambiar la carpeta con:
@@ -149,6 +189,48 @@ def cache_info() -> dict:
 
 def _safe(v):
     return None if (v is None or pd.isna(v)) else float(v)
+
+
+def _parse_target_date(date_str: str) -> pd.Timestamp:
+    """
+    Acepta fechas en ambos formatos:
+    - dd-mm-yy (historico del proyecto)
+    - YYYY-MM-DD (ISO)
+    """
+    raw = str(date_str).strip()
+
+    for fmt in ("%d-%m-%y", "%Y-%m-%d"):
+        try:
+            return pd.to_datetime(datetime.strptime(raw, fmt)).normalize()
+        except ValueError:
+            continue
+
+    raise ValueError(
+        "date_str invalido. Use 'dd-mm-yy' o 'YYYY-MM-DD'."
+    )
+
+
+def _validate_feature_contract(features: dict, is_train_mode: bool) -> list[str]:
+    errors: list[str] = []
+
+    expected_count = (
+        FEATURE_COUNT_TRAIN_MODE if is_train_mode else FEATURE_COUNT_INFERENCE_MODE
+    )
+    actual_count = len(features)
+
+    if actual_count != expected_count:
+        errors.append(
+            f"conteo de features invalido: expected={expected_count}, actual={actual_count}"
+        )
+
+    has_target = FEATURE_TARGET_KEY in features
+    if is_train_mode and not has_target:
+        errors.append(f"falta key requerida en train_mode: '{FEATURE_TARGET_KEY}'")
+
+    if not is_train_mode and has_target:
+        errors.append(f"key no permitida en inference_mode: '{FEATURE_TARGET_KEY}'")
+
+    return errors
 
 
 def _df_value(df: pd.DataFrame, ts: pd.Timestamp, col: str) -> float:
@@ -373,7 +455,15 @@ def _precip_sum_until_execution(day_rows: pd.DataFrame) -> float:
     p6 = day_rows["Precip_6h"].dropna()
 
     if len(p6) >= 1:
-        return float(p6.sum())
+        if "datetime_local" in day_rows.columns:
+            p6_rows = (
+                day_rows[["datetime_local", "Precip_6h"]]
+                .dropna(subset=["datetime_local", "Precip_6h"])
+                .sort_values("datetime_local")
+            )
+            if not p6_rows.empty:
+                return float(p6_rows["Precip_6h"].iloc[-1])
+        return float(p6.iloc[-1])
 
     return np.nan
 
@@ -482,7 +572,15 @@ def _precip_sum_from_rows(rows: pd.DataFrame) -> float:
         p6 = pd.Series(dtype=float)
 
     if len(p6) >= 1:
-        return float(p6.sum())
+        if "datetime_local" in rows.columns:
+            p6_rows = (
+                rows[["datetime_local", "Precip_6h"]]
+                .dropna(subset=["datetime_local", "Precip_6h"])
+                .sort_values("datetime_local")
+            )
+            if not p6_rows.empty:
+                return float(p6_rows["Precip_6h"].iloc[-1])
+        return float(p6.iloc[-1])
 
     return np.nan
 
@@ -1228,7 +1326,7 @@ def preload_weather_cache(
     start_date: str = DEFAULT_HISTORY_START_DATE,
     end_date: str = "2025-12-31",
     execution_hour: int = 23,
-    nearest_tolerance_hours: int = 2,
+    nearest_tolerance_hours: int = DEFAULT_NEAREST_TOLERANCE_HOURS,
     include_td_daily_cache: bool = True,
 ) -> dict:
     """
@@ -1242,8 +1340,10 @@ def preload_weather_cache(
     """
     city_key = city.lower().strip()
 
-    if city_key != "new york":
-        raise ValueError("Esta versión solo implementa fuentes NCEI/LaGuardia para New York.")
+    if city_key not in SUPPORTED_CITIES:
+        raise ValueError(
+            f"Ciudad no soportada por esta version. Use: {sorted(SUPPORTED_CITIES)}"
+        )
 
     tz = CITY_COORDS[city_key]["tz"]
 
@@ -1287,7 +1387,7 @@ def get_weather_features(
     date_str: str,
     strict: bool = True,
     execution_hour: int = 23,
-    nearest_tolerance_hours: int = 12,
+    nearest_tolerance_hours: int = DEFAULT_NEAREST_TOLERANCE_HOURS,
     history_start_date: str = DEFAULT_HISTORY_START_DATE,
     climatology_window_days: int = 7,
     min_climatology_records: int = 30,
@@ -1300,7 +1400,7 @@ def get_weather_features(
     del día X, hora local de New York.
 
     date_str:
-      formato esperado: "%d-%m-%y"
+      formatos soportados: "%d-%m-%y" y "%Y-%m-%d"
 
     mode:
       - "train_mode": devuelve features + target t_max_x+1.
@@ -1318,12 +1418,9 @@ def get_weather_features(
     """
     city_key = city.lower().strip()
 
-    if city_key not in CITY_COORDS:
-        raise ValueError(f"Ciudad no soportada. Use: {list(CITY_COORDS.keys())}")
-
-    if city_key != "new york":
+    if city_key not in SUPPORTED_CITIES:
         raise ValueError(
-            "Esta versión solo implementa fuentes NCEI/LaGuardia para New York."
+            f"Ciudad no soportada por esta version. Use: {sorted(SUPPORTED_CITIES)}"
         )
 
     feature_mode = _resolve_feature_mode(
@@ -1332,9 +1429,7 @@ def get_weather_features(
     )
     is_train_mode = feature_mode == "train_mode"
 
-    target_date = datetime.strptime(date_str, "%d-%m-%y")
-
-    target_ts = pd.to_datetime(target_date.strftime("%Y-%m-%d")).normalize()
+    target_ts = _parse_target_date(date_str)
     next_ts = target_ts + pd.Timedelta(days=1)
 
     execution_dt = target_ts + pd.Timedelta(hours=execution_hour)
@@ -2030,47 +2125,23 @@ def get_weather_features(
         features.update(metadata_features)
 
     if strict:
-        allowed_non_numeric = {"ciudad", "season"}
-
-        # td_anomaly_x puede faltar al inicio del histórico si todavía no hay
-        # suficientes registros para construir climatología de Td_23h.
-        # Las señales intradía granulares de Sprint 3-v0 también pueden faltar
-        # de forma puntual por huecos horarios de ISD-Lite; el contrato exige
-        # que la key exista y deja que el pipeline impute esos faltantes.
-        allowed_missing = {
-            "td_anomaly_x",
-            "Temp_06h_x",
-            "Temp_12h_x",
-            "Temp_18h_x",
-            "Temp_21h_x",
-            "Temp_change_23h_minus_18h",
-            "Temp_change_23h_minus_12h",
-            "Temp_change_23h_minus_06h",
-            "Temp_change_23h_1d",
-            "Temp_change_last_3h",
-            "Temp_change_last_6h",
-            "Temp_change_last_12h",
-            "Temp_slope_last_6h",
-            "Temp_slope_last_12h",
-            "Td_change_last_6h",
-            "HR_change_last_6h",
-            "SLP_change_last_3h",
-            "SLP_change_last_6h",
-            "SLP_change_last_12h",
-            "WindSpd_change_last_6h",
-            "Cloud_change_last_6h",
-            "Precip_positive_hours_00_23h",
-            "Precip_positive_hours_last_6h",
-            "Temp_23h_ma3",
-            "Temp_23h_trend_3d",
-            "HR_23h_ma3",
-            "WindSpd_23h_ma3",
-        }
+        contract_errors = _validate_feature_contract(
+            features=features,
+            is_train_mode=is_train_mode,
+        )
+        if contract_errors:
+            print(
+                "Error: contrato de features invalido "
+                f"(version={FEATURE_CONTRACT_VERSION}, mode={feature_mode})."
+            )
+            for err in contract_errors:
+                print(" -", err)
+            return {}
 
         missing_features = [
             k for k, v in features.items()
-            if k not in allowed_non_numeric
-            and k not in allowed_missing
+            if k not in FEATURE_ALLOWED_NON_NUMERIC
+            and k not in FEATURE_ALLOWED_MISSING
             and v is None
         ]
 

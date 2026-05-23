@@ -5565,16 +5565,16 @@ Para entrenamiento se sigue necesitando `scikit-learn`, como en SPRINT 2. El int
 
 Esta seccion resume riesgos detectados en la integracion entre `utils/build_climate_data.py` (feature builder), `utils/miner.py` (generacion de dataset) y `utils/test.py` (contrato y auditoria).
 
-| Riesgo | Modulos | Sintoma | Impacto | Prob. | Sev. | Mitigacion recomendada | Evidencia / Nota |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Defaults desalineados de `nearest_tolerance_hours` | build_climate_data + miner + test | Resultados no reproducibles si no se pasa el flag explicitamente | Cambia cobertura de features (especialmente as-of 23h) y tasa de filas vacias | Alta | Alta | Pasar siempre `--nearest-tolerance-hours` en `miner.py` y `test.py` y documentar un unico valor recomendado (actual: `6`) | `preload_weather_cache()` y `get_weather_features()` usan defaults distintos; ver tambien notas en `AGENTS.md` |
-| Retorno `{}` con `strict=True` induce sesgo de muestreo | build_climate_data + miner + test | `get_weather_features()` retorna `{}` cuando faltan inputs criticos (ej: `Cloud_23h_x`) | `miner.py` termina excluyendo fechas no aleatorias; el dataset queda sesgado hacia dias con mejor cobertura; `test.py` puede fallar por `empty_ratio` | Media | Alta | Persistir y analizar `failed_rows` como parte del pipeline; decidir politica (reintentos, tolerancias, o `strict` diferenciado train vs inference) | En auditoria se observaron fallos recurrentes por `Cloud_23h_x` y otros faltantes as-of 23h |
-| Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | Contrato actual: 133 en `train_mode` (incluye `t_max_x+1`) y 132 en inferencia |
-| Inconsistencia de formato de fecha (`date_str`) | build_climate_data + miner + test | El builder espera `%d-%m-%y`; ejecuciones directas con ISO fallan o generan fechas incorrectas | Errores de ejecucion o mineria con fechas desplazadas | Media | Media | Estandarizar input a ISO en CLI (`miner.py`/`test.py`) y convertir en un solo lugar; documentar formato aceptado para llamadas directas | Ver notas en `AGENTS.md`: `get_weather_features()` espera `%d-%m-%y` |
-| Ciudad soportada efectivamente solo `new york` | build_climate_data + miner + test | `CITY_COORDS` expone varias ciudades pero el builder hard-fail fuera de `new york` | Confusion operativa: `miner.py`/`test.py` aceptan `--city` pero el builder no soporta varias estaciones | Alta | Media | Documentar explicitamente la limitacion actual y/o validar antes en CLI para fallar con mensaje claro | `get_weather_features()` y `preload_weather_cache()` hard-fail fuera de `new york` (ver `AGENTS.md`) |
-| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | Observado en auditoria: fallo de import como script, ok como modulo |
-| Cache local afecta reproducibilidad y el git status | build_climate_data + miner + test | `.weather_cache/` puede cambiar entre corridas; accidentalmente se versionan borrados/cambios | Dificulta comparar resultados y contamina diffs/PRs | Media | Media | Mantener `.weather_cache/` ignorado y controlar ubicacion via `WEATHER_CACHE_DIR` o deshabilitar con `WEATHER_DISABLE_DISK_CACHE=1` | Ver notas en `AGENTS.md` sobre cache de disco |
-| Fallback de precipitacion puede sobrecontar (1h vs 6h) | build_climate_data + miner | Si se suman ventanas de 6h sin garantizar no solapamiento, `Precip_*` puede inflarse | Ruido sistematico en feature de precip; afecta entrenamiento | Baja | Media | Definir una unica estrategia (preferir 1h con umbral; si no, 6h sin sumar solapes) y cubrir con un test de consistencia | Riesgo identificado en la logica de precipitacion as-of 23h |
+| Riesgo | Modulos | Sintoma | Impacto | Prob. | Sev. | Mitigacion recomendada | Cobertura build | Evidencia / Nota |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Defaults desalineados de `nearest_tolerance_hours` | build_climate_data + miner + test | Resultados no reproducibles si no se pasa el flag explicitamente | Cambia cobertura de features (especialmente as-of 23h) y tasa de filas vacias | Alta | Alta | Pasar siempre `--nearest-tolerance-hours` en `miner.py` y `test.py` y documentar un unico valor recomendado (actual: `6`) | [x] | Cubierto en builder: `DEFAULT_NEAREST_TOLERANCE_HOURS = 6` para preload + feature builder. |
+| Retorno `{}` con `strict=True` induce sesgo de muestreo | build_climate_data + miner + test | `get_weather_features()` retorna `{}` cuando faltan inputs criticos (ej: `Cloud_23h_x`) | `miner.py` termina excluyendo fechas no aleatorias; el dataset queda sesgado hacia dias con mejor cobertura; `test.py` puede fallar por `empty_ratio` | Media | Alta | Persistir y analizar `failed_rows` como parte del pipeline; decidir politica (reintentos, tolerancias, o `strict` diferenciado train vs inference) | [x] | Mitigado en builder: `Cloud_23h_x` y otros faltantes puntuales pasan a imputacion; en muestra 120: `empty_returns=0`. |
+| Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | [x] | Cubierto en builder: `FEATURE_CONTRACT_VERSION` + validacion interna de conteo y target por modo. Pendiente sincronizar `test.py` para `unexpected_nulls`. |
+| Inconsistencia de formato de fecha (`date_str`) | build_climate_data + miner + test | El builder espera `%d-%m-%y`; ejecuciones directas con ISO fallan o generan fechas incorrectas | Errores de ejecucion o mineria con fechas desplazadas | Media | Media | Estandarizar input a ISO en CLI (`miner.py`/`test.py`) y convertir en un solo lugar; documentar formato aceptado para llamadas directas | [x] | Cubierto en builder: parseo dual `%d-%m-%y` y `%Y-%m-%d`. |
+| Ciudad soportada efectivamente solo `new york` | build_climate_data + miner + test | `CITY_COORDS` expone varias ciudades pero el builder hard-fail fuera de `new york` | Confusion operativa: `miner.py`/`test.py` aceptan `--city` pero el builder no soporta varias estaciones | Alta | Media | Documentar explicitamente la limitacion actual y/o validar antes en CLI para fallar con mensaje claro | [x] | Cubierto en builder: `SUPPORTED_CITIES={"new york"}` y validacion explicita en ambos entrypoints. |
+| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | [ ] | No cubierto en este ciclo: requiere cambios/documentacion en `miner.py`. |
+| Cache local afecta reproducibilidad y el git status | build_climate_data + miner + test | `.weather_cache/` puede cambiar entre corridas; accidentalmente se versionan borrados/cambios | Dificulta comparar resultados y contamina diffs/PRs | Media | Media | Mantener `.weather_cache/` ignorado y controlar ubicacion via `WEATHER_CACHE_DIR` o deshabilitar con `WEATHER_DISABLE_DISK_CACHE=1` | [ ] | No cubierto en este ciclo: riesgo operativo/documental, no de logica principal del builder. |
+| Fallback de precipitacion puede sobrecontar (1h vs 6h) | build_climate_data + miner | Si se suman ventanas de 6h sin garantizar no solapamiento, `Precip_*` puede inflarse | Ruido sistematico en feature de precip; afecta entrenamiento | Baja | Media | Definir una unica estrategia (preferir 1h con umbral; si no, 6h sin sumar solapes) y cubrir con un test de consistencia | [x] | Cubierto en builder: fallback `Precip_6h` usa ultimo valor valido en vez de suma. |
 
 </details>
 
@@ -5589,3 +5589,78 @@ Esta seccion resume riesgos detectados en la integracion entre `utils/build_clim
 # Desarrollo de V3
 
 ![Versión 3 image](./images/v3.png)
+
+<details open>
+<summary><strong>Ultimos cambios aplicados (build_climate_data)</strong></summary>
+
+Archivo modificado:
+
+```text
+./utils/build_climate_data.py
+```
+
+Cambios implementados:
+
+1. Se unifico la tolerancia por defecto con `DEFAULT_NEAREST_TOLERANCE_HOURS = 6` para `preload_weather_cache(...)` y `get_weather_features(...)`.
+
+2. Se dejo soporte explicito solo para New York:
+   - `SUPPORTED_CITIES = {"new york"}`
+   - `CITY_COORDS` ahora expone solo `new york`
+   - ambos entrypoints validan contra `SUPPORTED_CITIES`.
+
+3. Se agrego parseo dual de fecha en `get_weather_features(...)`:
+   - formato historico `%d-%m-%y`
+   - formato ISO `%Y-%m-%d`
+
+4. Se corrigio la estrategia de precipitacion en fallback `Precip_6h`:
+   - antes: suma de todos los `Precip_6h` del periodo
+   - ahora: ultimo `Precip_6h` valido (evita sobreconteo por ventanas solapadas)
+
+5. Se agrego contrato interno versionado del builder:
+   - `FEATURE_CONTRACT_VERSION = "sprint3_v0"`
+   - conteo esperado: 133 (`train_mode`) y 132 (`inference_mode`)
+   - validacion interna de presencia/ausencia de `t_max_x+1` segun modo
+
+6. Se movio la politica de faltantes a constantes y se permitio imputacion de faltantes puntuales (incluyendo `Cloud_23h_x`) para reducir descartes no necesarios en `strict=True`.
+
+Validacion ejecutada despues de los cambios:
+
+```bash
+python -m py_compile utils/build_climate_data.py
+
+python utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 120 \
+  --strict true \
+  --mode train_mode \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/fix_validation_train_v2
+
+python utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 120 \
+  --strict true \
+  --mode inference_mode \
+  --include-target false \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/fix_validation_inference_v2
+```
+
+Resultados observados:
+
+- `ok_returns=120` y `empty_returns=0` en train e inference para la muestra de 120 fechas.
+- `feature_union_count=133` en `train_mode` y `feature_union_count=132` en `inference_mode`.
+- `target_like_key_count=0` en inferencia (sin leakage del target).
+- Persisten `strict_contract_failure_count` en `utils/test.py` por su politica local de `unexpected_nulls`; se requiere sincronizar `test.py` con la nueva politica de faltantes permitidos del builder.
+
+</details>
