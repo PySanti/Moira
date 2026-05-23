@@ -1,0 +1,277 @@
+{
+  "dataset": "data/processed/sprint3.csv",
+  "target": "t_max_x+1",
+  "train_period": "1980-2020",
+  "external_eval_period": "2021-2025",
+  "holdout_note_period": "2026+",
+  "rows": {
+    "train": 14976,
+    "external_eval": 1826,
+    "holdout_2026_plus": 4
+  },
+  "features": {
+    "numeric_analyzed": 130,
+    "categorical_present": [
+      "season"
+    ]
+  },
+  "top_10": [
+    {
+      "feature": "Temp_23h_x",
+      "family": "temperature_current",
+      "utility_score": 0.8287916366129087,
+      "abs_pearson": 0.9445926900587932,
+      "abs_spearman": 0.9441163705917562,
+      "mutual_info": 1.113908722975646,
+      "drift_ks": 0.045604711010404836
+    },
+    {
+      "feature": "Temp_min_last_6h",
+      "family": "temperature_current",
+      "utility_score": 0.74429417675951,
+      "abs_pearson": 0.9432935717792617,
+      "abs_spearman": 0.9430016435095244,
+      "mutual_info": 1.1009904305102056,
+      "drift_ks": 0.04546666465442217
+    },
+    {
+      "feature": "Temp_mean_last_6h",
+      "family": "temperature_current",
+      "utility_score": 0.6603913738219982,
+      "abs_pearson": 0.9388492083294788,
+      "abs_spearman": 0.9386852414199598,
+      "mutual_info": 1.0447129370650057,
+      "drift_ks": 0.04615389331582678
+    },
+    {
+      "feature": "Temp_21h_x",
+      "family": "temperature_current",
+      "utility_score": 0.654311361941821,
+      "abs_pearson": 0.9370358317797778,
+      "abs_spearman": 0.9368464992676367,
+      "mutual_info": 1.0169182246446065,
+      "drift_ks": 0.04431650185126493
+    },
+    {
+      "feature": "Temp_max_last_6h",
+      "family": "temperature_rolling_trend",
+      "utility_score": 0.6391585655148633,
+      "abs_pearson": 0.9309228599294093,
+      "abs_spearman": 0.9310508783701336,
+      "mutual_info": 0.971349986993939,
+      "drift_ks": 0.04703983112237964
+    },
+    {
+      "feature": "Temp_18h_x",
+      "family": "temperature_current",
+      "utility_score": 0.6311906237313452,
+      "abs_pearson": 0.9276172760666793,
+      "abs_spearman": 0.9278548083506047,
+      "mutual_info": 0.9389889696847087,
+      "drift_ks": 0.04524115178360322
+    },
+    {
+      "feature": "Tmean_so_far_23h_x",
+      "family": "temperature_current",
+      "utility_score": 0.6189306901715488,
+      "abs_pearson": 0.9191316137060247,
+      "abs_spearman": 0.9216856667567963,
+      "mutual_info": 0.9064025334772836,
+      "drift_ks": 0.04507148692810456
+    },
+    {
+      "feature": "Tmax_so_far_23h_x",
+      "family": "temperature_rolling_trend",
+      "utility_score": 0.6101296759495523,
+      "abs_pearson": 0.9136074225139605,
+      "abs_spearman": 0.915938029101532,
+      "mutual_info": 0.8781795047181289,
+      "drift_ks": 0.04261877828054306
+    },
+    {
+      "feature": "Tmin_so_far_23h_x",
+      "family": "temperature_current",
+      "utility_score": 0.6054919819654662,
+      "abs_pearson": 0.9101017701068427,
+      "abs_spearman": 0.9128946006437206,
+      "mutual_info": 0.8764041465563706,
+      "drift_ks": 0.047816584967320275
+    },
+    {
+      "feature": "Temp_23h_ma3",
+      "family": "temperature_rolling_trend",
+      "utility_score": 0.60416756177528,
+      "abs_pearson": 0.9145585932154032,
+      "abs_spearman": 0.916375910646887,
+      "mutual_info": 0.8627346059744028,
+      "drift_ks": 0.05018096729498617
+    }
+  ],
+  "bottom_10": [
+    {
+      "feature": "Cloud_mean_last_6h",
+      "family": "other",
+      "utility_score": -0.018284458030363195,
+      "missing_rate": 0.0009348290598290599,
+      "max_peer_corr": 0.8834882324035433,
+      "drift_ks": 0.1324153568288322
+    },
+    {
+      "feature": "extreme_heat_flag",
+      "family": "temperature_lags",
+      "utility_score": -0.01932067266498439,
+      "missing_rate": 0.04887820512820513,
+      "max_peer_corr": 0.631707543564488,
+      "drift_ks": 0.001955663478533709
+    },
+    {
+      "feature": "extreme_cold_flag",
+      "family": "temperature_lags",
+      "utility_score": -0.023087843720285873,
+      "missing_rate": 0.04887820512820513,
+      "max_peer_corr": 0.5474446048279555,
+      "drift_ks": 0.03517666881411363
+    },
+    {
+      "feature": "HR_min_00_23h_x",
+      "family": "humidity_dewpoint",
+      "utility_score": -0.0233120496764296,
+      "missing_rate": 0.0,
+      "max_peer_corr": 0.9011038475069745,
+      "drift_ks": 0.13355989190548012
+    },
+    {
+      "feature": "Temp_dewpoint_spread_23h",
+      "family": "temperature_current",
+      "utility_score": -0.024031371968012676,
+      "missing_rate": 0.0002670940170940171,
+      "max_peer_corr": 0.9791645725471947,
+      "drift_ks": 0.11467570542116134
+    },
+    {
+      "feature": "Temp_dewpoint_spread_mean_00_23h",
+      "family": "temperature_current",
+      "utility_score": -0.04998151625997409,
+      "missing_rate": 0.0,
+      "max_peer_corr": 0.9749680686910772,
+      "drift_ks": 0.14224783182503775
+    },
+    {
+      "feature": "tmax_anomaly_x",
+      "family": "climatology",
+      "utility_score": -0.05997738969347423,
+      "missing_rate": 0.04887820512820513,
+      "max_peer_corr": 0.9990557275032914,
+      "drift_ks": 0.05493417248955185
+    },
+    {
+      "feature": "tmax_anomaly_vs_doy_plus1",
+      "family": "climatology",
+      "utility_score": -0.06203066580866336,
+      "missing_rate": 0.04887820512820513,
+      "max_peer_corr": 0.9990557275032914,
+      "drift_ks": 0.053773725159819596
+    },
+    {
+      "feature": "climatology_tmax_delta_doy_plus1_minus_x",
+      "family": "climatology",
+      "utility_score": -0.06802078819295937,
+      "missing_rate": 0.04887820512820513,
+      "max_peer_corr": 0.735482608032084,
+      "drift_ks": 0.06359058044231769
+    },
+    {
+      "feature": "Cloud_23h_x",
+      "family": "other",
+      "utility_score": -0.19670085826388595,
+      "missing_rate": 0.05235042735042735,
+      "max_peer_corr": 0.8834882324035433,
+      "drift_ks": 0.1557098422151556
+    }
+  ],
+  "family_summary": [
+    {
+      "family": "astronomical",
+      "n_features": 3,
+      "utility_score_mean": 0.37707605290069357,
+      "missing_rate_mean": 0.0,
+      "drift_ks_mean": 0.00014795487310549174
+    },
+    {
+      "family": "temperature_lags",
+      "n_features": 15,
+      "utility_score_mean": 0.3763755011315469,
+      "missing_rate_mean": 0.006548254985754985,
+      "drift_ks_mean": 0.03466647057999516
+    },
+    {
+      "family": "seasonality",
+      "n_features": 5,
+      "utility_score_mean": 0.32244998545496606,
+      "missing_rate_mean": 0.0,
+      "drift_ks_mean": 0.00013761339062545174
+    },
+    {
+      "family": "climatology",
+      "n_features": 14,
+      "utility_score_mean": 0.3004810135134684,
+      "missing_rate_mean": 0.048892513736263736,
+      "drift_ks_mean": 0.05465036671848515
+    },
+    {
+      "family": "temperature_rolling_trend",
+      "n_features": 36,
+      "utility_score_mean": 0.2959666216290404,
+      "missing_rate_mean": 0.0003653994539411206,
+      "drift_ks_mean": 0.053451678549900856
+    },
+    {
+      "family": "temperature_current",
+      "n_features": 22,
+      "utility_score_mean": 0.2953701431429671,
+      "missing_rate_mean": 3.338675213675214e-05,
+      "drift_ks_mean": 0.041330156139865154
+    },
+    {
+      "family": "humidity_dewpoint",
+      "n_features": 11,
+      "utility_score_mean": 0.26781121764957133,
+      "missing_rate_mean": 6.07031857031857e-05,
+      "drift_ks_mean": 0.05916282165632903
+    },
+    {
+      "family": "wind",
+      "n_features": 8,
+      "utility_score_mean": 0.10349773288078487,
+      "missing_rate_mean": 0.005825988247863248,
+      "drift_ks_mean": 0.06788156137622259
+    },
+    {
+      "family": "pressure",
+      "n_features": 7,
+      "utility_score_mean": 0.05692252482142542,
+      "missing_rate_mean": 0.0012114621489621488,
+      "drift_ks_mean": 0.03035210815732971
+    },
+    {
+      "family": "precipitation",
+      "n_features": 5,
+      "utility_score_mean": 0.04153268141505689,
+      "missing_rate_mean": 0.0004674145299145299,
+      "drift_ks_mean": 0.01633294416035582
+    },
+    {
+      "family": "other",
+      "n_features": 4,
+      "utility_score_mean": -0.046286481805305965,
+      "missing_rate_mean": 0.015574919871794872,
+      "drift_ks_mean": 0.11506352161119174
+    }
+  ],
+  "utility_score_formula": "0.15 pearson + 0.15 spearman + 0.05 kendall + 0.20 MI + 0.15 permutation + 0.10 gain + 0.10 univariate_lift + 0.10 temporal_stability - 0.10 missing - 0.10 redundancy - 0.10 drift",
+  "notes": [
+    "Analisis orientado a utilidad predictiva practica.",
+    "Bottom features pueden ser debiles por baja senal, drift, redundancia o missingness.",
+    "Las conclusiones deben cruzarse con evaluacion de modelos para decisiones finales de feature engineering."
+  ]
+}
