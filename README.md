@@ -5843,3 +5843,188 @@ Auditoria de utilidad para entrenamiento (escala 1-10):
 # Desarrollo de V3
 
 ![Versión 3 image](./docs/assets/v3.png)
+
+# Sprint 3 - V0
+
+<details open>
+<summary><strong>Configuracion de entrenamiento</strong></summary>
+
+Script ejecutado:
+
+```text
+./experiments/v0-sprint3/train_1.0/main.py
+```
+
+Comando:
+
+```bash
+python ./experiments/v0-sprint3/train_1.0/main.py
+```
+
+Dataset utilizado:
+
+```text
+./data/processed/sprint3.csv
+```
+
+Split temporal:
+
+- Train/validation: `1980-2020`.
+- Test final: `2021+`.
+- Regla de validacion: expanding-window backtest (walk-forward por anio).
+
+Esquema de validacion:
+
+```text
+train: 1980              -> validation: 1981
+train: 1980-1981         -> validation: 1982
+train: 1980-1982         -> validation: 1983
+...
+train: 1980-2019         -> validation: 2020
+test final: 2021-2026
+```
+
+Modelos comparados:
+
+- `hist_gbr`
+- `lightgbm`
+- `xgboost`
+- `elasticnet`
+- `ridge`
+- `gbr`
+- `mlp`
+- `extra_trees`
+- `random_forest`
+
+Criterio de seleccion: menor `MAE` global en validacion temporal.
+
+</details>
+
+<details open>
+<summary><strong>Artefactos generados</strong></summary>
+
+```text
+./experiments/v0-sprint3/train_1.0/report.json
+./experiments/v0-sprint3/train_1.0/model_comparison.csv
+./experiments/v0-sprint3/train_1.0/validation_predictions.csv
+./experiments/v0-sprint3/train_1.0/test_predictions.csv
+./experiments/v0-sprint3/train_1.0/models/best_model.joblib
+./experiments/v0-sprint3/train_1.0/plots/model_comparison_mae.png
+./experiments/v0-sprint3/train_1.0/plots/validation_mae_by_year.png
+./experiments/v0-sprint3/train_1.0/plots/test_mae_by_year.png
+./experiments/v0-sprint3/train_1.0/plots/mae_by_season.png
+./experiments/v0-sprint3/train_1.0/plots/test_actual_vs_predicted.png
+./experiments/v0-sprint3/train_1.0/plots/test_timeseries_actual_vs_predicted.png
+./experiments/v0-sprint3/train_1.0/plots/error_distribution.png
+```
+
+</details>
+
+<details open>
+<summary><strong>Resultados principales</strong></summary>
+
+Modelo ganador por validacion:
+
+- `hist_gbr` (`HistGradientBoostingRegressor`).
+
+Ranking por MAE de validacion (menor es mejor):
+
+| Modelo | MAE validacion (°C) | MAE test (°C) |
+| ------ | ------------------: | ------------: |
+| `hist_gbr` | `2.1882` | `2.4281` |
+| `lightgbm` | `2.1906` | `2.4468` |
+| `xgboost` | `2.2016` | `2.4188` |
+| `elasticnet` | `2.2148` | `2.3599` |
+| `ridge` | `2.2165` | `2.3903` |
+| `gbr` | `2.2337` | `2.4576` |
+| `mlp` | `2.2461` | `2.2777` |
+| `extra_trees` | `2.2933` | `2.5013` |
+| `random_forest` | `2.3058` | `2.5049` |
+
+Metricas globales del ganador:
+
+| Split | N | MAE (°C) | RMSE (°C) | Median AE (°C) | P90 AE (°C) | Bias (°C) | R² |
+| ----- | -: | -------: | --------: | -------------: | ----------: | --------: | -: |
+| Validacion walk-forward | `14610` | `2.1882` | `2.8189` | `1.7716` | `4.5758` | `-0.1454` | `0.9224` |
+| Test 2021+ | `1830` | `2.4281` | `3.3726` | `1.8123` | `5.1579` | `-0.1139` | `0.8821` |
+
+MAE test por anio:
+
+| Anio | N | MAE (°C) |
+| ---: | -: | -------: |
+| `2021` | `365` | `2.1144` |
+| `2022` | `365` | `2.0341` |
+| `2023` | `365` | `2.0368` |
+| `2024` | `366` | `2.0633` |
+| `2025` | `365` | `3.7638` |
+| `2026` | `4` | `14.2241` |
+
+MAE por temporada (ganador):
+
+| Temporada | Validacion MAE (°C) | Test MAE (°C) |
+| --------- | ------------------: | ------------: |
+| `winter` | `2.0956` | `2.6992` |
+| `spring` | `2.7468` | `2.7301` |
+| `summer` | `2.0230` | `1.8809` |
+| `autumn` | `1.8825` | `2.4050` |
+
+Baselines simples en test:
+
+| Baseline | MAE (°C) |
+| -------- | -------: |
+| `Tmax_so_far_23h_x` | `3.2402` |
+| `MA_Tmax_3d_asof_23h` | `3.5876` |
+| `climatology_tmax_doy` | `3.4895` |
+| `tmean_ma7` | `4.8754` |
+
+Lectura rapida:
+
+- El ganador mejora de forma clara a todos los baselines simples.
+- `lightgbm` y `xgboost` quedaron muy cerca del ganador en validacion, pero sin superarlo.
+- `mlp` logra el mejor MAE en test (`2.2777`) sin ser ganador por criterio de validacion.
+- En test aparece degradacion fuerte en `2025` y extrema en `2026` por cobertura parcial (solo 4 filas de 2026).
+
+</details>
+
+<details open>
+<summary><strong>Graficos generados</strong></summary>
+
+### Comparacion de modelos por MAE
+
+![Comparacion de modelos por MAE](./experiments/v0-sprint3/train_1.0/plots/model_comparison_mae.png)
+
+### MAE de validacion por anio
+
+![MAE de validacion por anio Sprint 3](./experiments/v0-sprint3/train_1.0/plots/validation_mae_by_year.png)
+
+### MAE test por anio
+
+![MAE test por anio Sprint 3](./experiments/v0-sprint3/train_1.0/plots/test_mae_by_year.png)
+
+### MAE por temporada
+
+![MAE por temporada Sprint 3](./experiments/v0-sprint3/train_1.0/plots/mae_by_season.png)
+
+### Test: real vs prediccion
+
+![Test real vs prediccion Sprint 3](./experiments/v0-sprint3/train_1.0/plots/test_actual_vs_predicted.png)
+
+### Test: serie temporal real vs predicha
+
+![Test serie temporal real vs predicha Sprint 3](./experiments/v0-sprint3/train_1.0/plots/test_timeseries_actual_vs_predicted.png)
+
+### Distribucion de errores
+
+![Distribucion de errores Sprint 3](./experiments/v0-sprint3/train_1.0/plots/error_distribution.png)
+
+</details>
+
+<details open>
+<summary><strong>Notas tecnicas y limitaciones</strong></summary>
+
+- El criterio de seleccion fue estrictamente `MAE` de validacion temporal para evitar sesgo por test.
+- El test incluye `2026`, pero con solo `4` filas disponibles debido a faltantes del dataset Sprint 3.
+- Los warnings de imputacion en folds tempranos son esperables: algunas features climatologicas no tienen observaciones suficientes al inicio del historial.
+- Se mantuvieron controles anti-leakage: split temporal estricto, transforms ajustadas por fold y exclusion de `date`, `date_str`, `year` y target en features.
+
+</details>
