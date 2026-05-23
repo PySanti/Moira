@@ -1,0 +1,200 @@
+{
+  "module": "moira.features.build_climate_data",
+  "function": "get_weather_features",
+  "city": "new york",
+  "date_range_start": "2014-01-01",
+  "date_range_end": "2025-12-31",
+  "date_format": "%d-%m-%y",
+  "strict": true,
+  "mode": "train_mode",
+  "resolved_mode": "train_mode",
+  "include_target": null,
+  "history_start": "1980-01-01",
+  "execution_hour": 23,
+  "nearest_tolerance_hours": 6,
+  "climatology_window_days": 7,
+  "min_climatology_records": 30,
+  "compute_td_anomaly": true,
+  "function_kwargs": {
+    "strict": true,
+    "execution_hour": 23,
+    "nearest_tolerance_hours": 6,
+    "history_start_date": "1980-01-01",
+    "climatology_window_days": 7,
+    "min_climatology_records": 30,
+    "compute_td_anomaly": true,
+    "mode": "train_mode"
+  },
+  "enforce_build_climate_contract": true,
+  "contract_source": "module_exports",
+  "contract_version": "sprint4_v0",
+  "contract_target_key": "t_max_x+1",
+  "contract_allowed_non_numeric": [
+    "ciudad"
+  ],
+  "contract_allowed_missing_count": 62,
+  "contract_supported_cities": [
+    "new york"
+  ],
+  "expected_feature_count_train": 149,
+  "expected_feature_count_inference": 148,
+  "samples_total": 20,
+  "ok_returns": 20,
+  "empty_returns": 0,
+  "errors_total": 0,
+  "ok_ratio": 1.0,
+  "empty_ratio": 0.0,
+  "error_ratio": 0.0,
+  "first_ok_date": "2014-01-14",
+  "last_ok_date": "2023-10-14",
+  "feature_union_count": 149,
+  "schema_variants_count": 1,
+  "dominant_schema_hash": "210d6a0fed04e285",
+  "dominant_schema_count": 20,
+  "duration_mean_sec": 0.04341209000049275,
+  "duration_median_sec": 0.034402450000925455,
+  "duration_p95_sec": 0.07029999999940628,
+  "duration_success_mean_sec": 0.04341209000049275,
+  "duration_success_p95_sec": 0.07029999999940628,
+  "attempts_mean": 1,
+  "backoff_slept_total_sec": 0.0,
+  "non_finite_numeric_total": 0,
+  "target_like_key_count": 1,
+  "inference_leakage_check": {
+    "checked": 10,
+    "failures": 0,
+    "failure_examples": [],
+    "target_like_keys": [],
+    "errors": []
+  },
+  "train_inference_parity_check": {
+    "checked": 10,
+    "failures": 10,
+    "failure_examples": [
+      {
+        "date": "2014-01-14",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=1.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=1.0"
+        ]
+      },
+      {
+        "date": "2014-11-09",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=11.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=11.0"
+        ]
+      },
+      {
+        "date": "2015-03-02",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=3.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=3.0"
+        ]
+      },
+      {
+        "date": "2015-03-05",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=3.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=3.0"
+        ]
+      },
+      {
+        "date": "2015-12-16",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=12.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=12.0"
+        ]
+      },
+      {
+        "date": "2015-12-19",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=12.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=12.0"
+        ]
+      },
+      {
+        "date": "2016-06-01",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=6.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=6.0"
+        ]
+      },
+      {
+        "date": "2017-01-11",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=1.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=1.0"
+        ]
+      },
+      {
+        "date": "2017-07-31",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=7.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=7.0"
+        ]
+      },
+      {
+        "date": "2017-09-03",
+        "reason": "mode_specific_contract_failure",
+        "train_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=9.0"
+        ],
+        "inference_failures": [
+          "missing_required_keys=Cloud_23h_x, Cloud_mean_00_23h_x, HR_23h_ma3, HR_mean_00_23h_x, SLP_mean_00_23h_x, Temp_dewpoint_spread_23h, climatology_tmax_delta_doy_plus1_minus_x, extreme_cold_flag, extreme_heat_flag, season, tmax_anomaly_vs_doy_plus1, tmax_anomaly_x",
+          "season/month mismatch: season=None month=9.0"
+        ]
+      }
+    ],
+    "errors": []
+  },
+  "strict_contract_failure_count": 20,
+  "seed": 123,
+  "sampling_no_replacement": true
+}

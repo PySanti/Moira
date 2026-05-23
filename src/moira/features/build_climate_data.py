@@ -60,24 +60,19 @@ FEATURE_TARGET_KEY = "t_max_x+1"
 # Contrato interno de validacion (alineable con tests/contract/test_feature_contract.py)
 FEATURE_ALLOWED_NON_NUMERIC = {"ciudad"}
 FEATURE_ALLOWED_MISSING = {
-    "Cloud_23h_x",
     "WindDir_sin_23h_x",
     "WindDir_cos_23h_x",
     "wind_u",
     "wind_v",
     "pressure_trend_3d",
-    "td_anomaly_x",
     "Temp_06h_x",
     "Temp_12h_x",
     "Temp_18h_x",
     "Temp_21h_x",
     "Temp_change_23h_minus_18h",
-    "Temp_change_23h_minus_12h",
     "Temp_change_23h_minus_06h",
     "Temp_change_23h_1d",
-    "Temp_change_last_3h",
     "Temp_change_last_6h",
-    "Temp_change_last_12h",
     "Temp_slope_last_6h",
     "Temp_slope_last_12h",
     "Td_change_last_6h",
@@ -86,12 +81,10 @@ FEATURE_ALLOWED_MISSING = {
     "SLP_change_last_6h",
     "SLP_change_last_12h",
     "WindSpd_change_last_6h",
-    "Cloud_change_last_6h",
     "Precip_positive_hours_00_23h",
     "Precip_positive_hours_last_6h",
     "Temp_23h_ma3",
     "Temp_23h_trend_3d",
-    "HR_23h_ma3",
     "WindSpd_23h_ma3",
     "hrrr_forecast_available",
     "hrrr_fallback_used",
@@ -130,6 +123,45 @@ FEATURE_ALLOWED_MISSING = {
     "hrrr_tmax_vs_tmax_so_far_x",
     "hrrr_tmax_vs_tmax_lag1",
 }
+
+EXPECTED_INFERENCE_FEATURES = frozenset({
+    "Tmax_so_far_23h_x", "Tmin_so_far_23h_x", "Tmean_so_far_23h_x", "Temp_23h_x",
+    "Delta_Tmax_so_far_1d_23h", "MA_Tmax_3d_asof_23h", "DTR_so_far_23h_x", "HR_23h_x",
+    "Td_23h_x", "SLP_23h_x", "Delta_SLP_24h_23h", "WindSpd_23h_x", "WindDir_sin_23h_x",
+    "WindDir_cos_23h_x", "Precip_sum_00_23h_x", "Temp_06h_x", "Temp_12h_x", "Temp_18h_x",
+    "Temp_21h_x", "Temp_change_23h_minus_18h", "Temp_change_23h_minus_06h", "Temp_change_23h_1d",
+    "Temp_std_00_23h_x", "Temp_range_00_23h_x", "Temp_mean_last_6h", "Temp_min_last_6h",
+    "Temp_max_last_6h", "Temp_change_last_6h", "Temp_slope_last_6h", "Temp_slope_last_12h",
+    "Td_mean_00_23h_x", "Td_min_00_23h_x", "Td_max_00_23h_x", "Td_mean_last_6h", "Td_change_last_6h",
+    "HR_max_00_23h_x", "HR_change_last_6h", "SLP_max_00_23h_x", "SLP_change_last_3h",
+    "SLP_change_last_6h", "SLP_change_last_12h", "WindSpd_mean_00_23h_x", "WindSpd_max_00_23h_x",
+    "WindSpd_mean_last_6h", "WindSpd_change_last_6h", "Precip_sum_last_6h", "Precip_positive_hours_00_23h",
+    "Precip_positive_hours_last_6h", "Precip_flag_00_23h", "Vapor_pressure_23h", "climatology_tmax_doy",
+    "climatology_tmax_std_doy", "climatology_tmax_p10_doy", "climatology_tmax_p90_doy",
+    "climatology_tmax_doy_plus1", "climatology_tmax_std_doy_plus1", "climatology_tmax_p10_doy_plus1",
+    "climatology_tmax_p90_doy_plus1", "climatology_tmin_doy_plus1", "climatology_tmean_doy_plus1",
+    "tmax_lag1", "tmax_lag2", "tmax_lag3", "tmax_lag7", "tmin_lag1", "tmin_lag2", "tmin_lag3",
+    "tmin_lag7", "tmean_lag1", "tmean_lag2", "tmean_lag3", "dtr_lag1", "tmax_ma3_completed",
+    "tmax_ma7_completed", "tmax_ma14_completed", "tmax_std7_completed", "tmax_min7_completed",
+    "tmax_max7_completed", "tmin_ma3_completed", "tmin_ma7_completed", "tmean_ma3_completed", "tmean_ma7",
+    "tmean_ma14_completed", "tmean_std7_completed", "dtr_ma7_completed", "tmax_change_1d_completed",
+    "tmax_change_3d_completed", "tmax_recent_warming_streak", "tmax_recent_cooling_streak", "tmax_trend_3d",
+    "tmax_trend_7d", "dtr_ma3", "td_ma3", "Temp_23h_ma3", "Temp_23h_trend_3d", "WindSpd_23h_ma3",
+    "wind_u", "wind_v", "pressure_trend_3d", "month", "month_sin", "month_cos", "season_winter",
+    "season_spring", "season_summer", "season_autumn", "daylight_hours_x", "daylight_hours_plus1",
+    "daylight_delta_plus1_minus_x", "hrrr_forecast_available", "hrrr_fallback_used", "hrrr_run_init_utc_hour",
+    "hrrr_run_age_hours_at_execution", "hrrr_lead_hours_to_x1_00h", "hrrr_lead_hours_to_x1_23h",
+    "hrrr_temp_2m_x1_00h", "hrrr_temp_2m_x1_03h", "hrrr_temp_2m_x1_06h", "hrrr_temp_2m_x1_09h",
+    "hrrr_temp_2m_x1_12h", "hrrr_temp_2m_x1_15h", "hrrr_temp_2m_x1_18h", "hrrr_temp_2m_x1_21h",
+    "hrrr_temp_2m_x1_max", "hrrr_temp_2m_x1_min", "hrrr_temp_2m_x1_mean", "hrrr_temp_2m_x1_range",
+    "hrrr_dewpoint_2m_x1_mean", "hrrr_dewpoint_2m_x1_max", "hrrr_rh_2m_x1_mean", "hrrr_vpd_x1_mean",
+    "hrrr_pressure_surface_x1_mean", "hrrr_pressure_surface_x1_min", "hrrr_wind_10m_x1_mean",
+    "hrrr_wind_10m_x1_max", "hrrr_wind_gust_x1_max", "hrrr_wind_dir_10m_x1_sin_mean",
+    "hrrr_wind_dir_10m_x1_cos_mean", "hrrr_cloud_cover_x1_mean", "hrrr_cloud_cover_x1_max",
+    "hrrr_precip_x1_sum", "hrrr_precip_x1_max_hourly", "hrrr_precip_flag_x1", "hrrr_tmax_vs_tmax_so_far_x",
+    "hrrr_tmax_vs_tmax_lag1", "ciudad", "doy_sin", "doy_cos",
+})
+EXPECTED_TRAIN_FEATURES = frozenset(set(EXPECTED_INFERENCE_FEATURES) | {FEATURE_TARGET_KEY})
 
 # Cache persistente.
 # Puedes cambiar la carpeta con:
@@ -249,6 +281,7 @@ def _parse_target_date(date_str: str) -> pd.Timestamp:
 def _validate_feature_contract(features: dict, is_train_mode: bool) -> list[str]:
     errors: list[str] = []
 
+    expected_features = EXPECTED_TRAIN_FEATURES if is_train_mode else EXPECTED_INFERENCE_FEATURES
     expected_count = (
         FEATURE_COUNT_TRAIN_MODE if is_train_mode else FEATURE_COUNT_INFERENCE_MODE
     )
@@ -265,6 +298,35 @@ def _validate_feature_contract(features: dict, is_train_mode: bool) -> list[str]
 
     if not is_train_mode and has_target:
         errors.append(f"key no permitida en inference_mode: '{FEATURE_TARGET_KEY}'")
+
+    actual_feature_names = set(features.keys())
+    missing = sorted(expected_features - actual_feature_names)
+    extra = sorted(actual_feature_names - expected_features)
+    if missing:
+        errors.append(
+            "faltan keys en schema exacto: " + ", ".join(missing[:20])
+            + (" ..." if len(missing) > 20 else "")
+        )
+    if extra:
+        errors.append(
+            "sobran keys en schema exacto: " + ", ".join(extra[:20])
+            + (" ..." if len(extra) > 20 else "")
+        )
+
+    hrrr_available = features.get("hrrr_forecast_available", None)
+    if hrrr_available in (1.0, 1):
+        required_hrrr_meta = [
+            "hrrr_run_init_utc_hour",
+            "hrrr_run_age_hours_at_execution",
+            "hrrr_lead_hours_to_x1_00h",
+            "hrrr_lead_hours_to_x1_23h",
+        ]
+        missing_hrrr_meta = [k for k in required_hrrr_meta if features.get(k, None) is None]
+        if missing_hrrr_meta:
+            errors.append(
+                "forecast HRRR marcado como disponible sin metadata temporal completa: "
+                + ", ".join(missing_hrrr_meta)
+            )
 
     return errors
 
@@ -403,13 +465,18 @@ def _nansum(values: list[float]) -> float:
 
 
 def _fetch_open_meteo_hrrr_day_x1(city_key: str, target_ts: pd.Timestamp) -> dict[str, float]:
-    tz_name = CITY_COORDS[city_key]["tz"]
-    lat = CITY_COORDS[city_key]["lat"]
-    lon = CITY_COORDS[city_key]["lon"]
+    """
+    Placeholder conservador para Sprint 4 auditoría.
 
+    No usa Open-Meteo Historical Forecast como fuente principal porque no
+    garantiza selección run/init auditable as-of 23h para evitar leakage.
+
+    Hasta integrar HRRR run-exact (p.ej. NOAA AWS), todas las hrrr_*
+    se devuelven como NaN y hrrr_forecast_available=0.
+    """
     defaults = {
         "hrrr_forecast_available": 0.0,
-        "hrrr_fallback_used": 1.0,
+        "hrrr_fallback_used": 0.0,
         "hrrr_run_init_utc_hour": np.nan,
         "hrrr_run_age_hours_at_execution": np.nan,
         "hrrr_lead_hours_to_x1_00h": np.nan,
@@ -445,98 +512,6 @@ def _fetch_open_meteo_hrrr_day_x1(city_key: str, target_ts: pd.Timestamp) -> dic
         "hrrr_tmax_vs_tmax_so_far_x": np.nan,
         "hrrr_tmax_vs_tmax_lag1": np.nan,
     }
-
-    x1 = (target_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    url = "https://historical-forecast-api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": str(lat),
-        "longitude": str(lon),
-        "start_date": x1,
-        "end_date": x1,
-        "timezone": tz_name,
-        "models": "ncep_hrrr",
-        "hourly": (
-            "temperature_2m,relative_humidity_2m,dew_point_2m,"
-            "surface_pressure,wind_speed_10m,wind_direction_10m,"
-            "wind_gusts_10m,cloud_cover,precipitation,vapour_pressure_deficit"
-        ),
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=35)
-        resp.raise_for_status()
-        payload = resp.json()
-        hourly = payload.get("hourly", {})
-        times = pd.to_datetime(hourly.get("time", []), errors="coerce")
-        if len(times) == 0:
-            return defaults
-
-        data = pd.DataFrame(
-            {
-                "time": times,
-                "temperature_2m": pd.to_numeric(hourly.get("temperature_2m", []), errors="coerce"),
-                "relative_humidity_2m": pd.to_numeric(hourly.get("relative_humidity_2m", []), errors="coerce"),
-                "dew_point_2m": pd.to_numeric(hourly.get("dew_point_2m", []), errors="coerce"),
-                "surface_pressure": pd.to_numeric(hourly.get("surface_pressure", []), errors="coerce"),
-                "wind_speed_10m": pd.to_numeric(hourly.get("wind_speed_10m", []), errors="coerce"),
-                "wind_direction_10m": pd.to_numeric(hourly.get("wind_direction_10m", []), errors="coerce"),
-                "wind_gusts_10m": pd.to_numeric(hourly.get("wind_gusts_10m", []), errors="coerce"),
-                "cloud_cover": pd.to_numeric(hourly.get("cloud_cover", []), errors="coerce"),
-                "precipitation": pd.to_numeric(hourly.get("precipitation", []), errors="coerce"),
-                "vapour_pressure_deficit": pd.to_numeric(hourly.get("vapour_pressure_deficit", []), errors="coerce"),
-            }
-        )
-        data = data.dropna(subset=["time"])  # pragma: no branch
-        if data.empty:
-            return defaults
-
-        temp = data["temperature_2m"].to_list()
-        dew = data["dew_point_2m"].to_list()
-        rh = data["relative_humidity_2m"].to_list()
-        vpd = data["vapour_pressure_deficit"].to_list()
-        prs = data["surface_pressure"].to_list()
-        wsp = data["wind_speed_10m"].to_list()
-        wdir = data["wind_direction_10m"].to_numpy(dtype=float)
-        wgst = data["wind_gusts_10m"].to_list()
-        cld = data["cloud_cover"].to_list()
-        prc = data["precipitation"].to_list()
-
-        by_hour = {int(t.hour): v for t, v in zip(data["time"], data["temperature_2m"]) if pd.notna(v)}
-        defaults.update(
-            {
-                "hrrr_forecast_available": 1.0,
-                "hrrr_temp_2m_x1_00h": by_hour.get(0, np.nan),
-                "hrrr_temp_2m_x1_03h": by_hour.get(3, np.nan),
-                "hrrr_temp_2m_x1_06h": by_hour.get(6, np.nan),
-                "hrrr_temp_2m_x1_09h": by_hour.get(9, np.nan),
-                "hrrr_temp_2m_x1_12h": by_hour.get(12, np.nan),
-                "hrrr_temp_2m_x1_15h": by_hour.get(15, np.nan),
-                "hrrr_temp_2m_x1_18h": by_hour.get(18, np.nan),
-                "hrrr_temp_2m_x1_21h": by_hour.get(21, np.nan),
-                "hrrr_temp_2m_x1_max": _nanmax(temp),
-                "hrrr_temp_2m_x1_min": _nanmin(temp),
-                "hrrr_temp_2m_x1_mean": _nanmean(temp),
-                "hrrr_temp_2m_x1_range": _safe_sub(_nanmax(temp), _nanmin(temp)),
-                "hrrr_dewpoint_2m_x1_mean": _nanmean(dew),
-                "hrrr_dewpoint_2m_x1_max": _nanmax(dew),
-                "hrrr_rh_2m_x1_mean": _nanmean(rh),
-                "hrrr_vpd_x1_mean": _nanmean(vpd),
-                "hrrr_pressure_surface_x1_mean": _nanmean(prs),
-                "hrrr_pressure_surface_x1_min": _nanmin(prs),
-                "hrrr_wind_10m_x1_mean": _nanmean(wsp),
-                "hrrr_wind_10m_x1_max": _nanmax(wsp),
-                "hrrr_wind_gust_x1_max": _nanmax(wgst),
-                "hrrr_wind_dir_10m_x1_sin_mean": _nanmean(np.sin(np.deg2rad(wdir)).tolist()),
-                "hrrr_wind_dir_10m_x1_cos_mean": _nanmean(np.cos(np.deg2rad(wdir)).tolist()),
-                "hrrr_cloud_cover_x1_mean": _nanmean(cld),
-                "hrrr_cloud_cover_x1_max": _nanmax(cld),
-                "hrrr_precip_x1_sum": _nansum(prc),
-                "hrrr_precip_x1_max_hourly": _nanmax(prc),
-                "hrrr_precip_flag_x1": 1.0 if _nansum(prc) > 0 else 0.0,
-            }
-        )
-    except Exception:
-        return defaults
-
     return defaults
 
 
@@ -889,16 +864,18 @@ def _fetch_ncei_daily_year(
     if cache_key in _NCEI_DAILY_YEAR_CACHE:
         return _NCEI_DAILY_YEAR_CACHE[cache_key].copy()
 
-    disk_df = _read_df_from_disk_cache("ncei_daily_year", cache_key)
-    if disk_df is not None:
-        _NCEI_DAILY_YEAR_CACHE[cache_key] = disk_df.copy()
-        return disk_df.copy()
-
     start_date = f"{year}-01-01"
 
     # Evita pedir datos demasiado futuros en el año actual.
     today = pd.Timestamp.today().normalize()
     year_end = pd.Timestamp(year=year, month=12, day=31)
+    is_incomplete_year = year_end > today and year >= today.year
+
+    if not is_incomplete_year:
+        disk_df = _read_df_from_disk_cache("ncei_daily_year", cache_key)
+        if disk_df is not None:
+            _NCEI_DAILY_YEAR_CACHE[cache_key] = disk_df.copy()
+            return disk_df.copy()
 
     if year_end > today and year >= today.year:
         end_ts = today
@@ -935,7 +912,8 @@ def _fetch_ncei_daily_year(
         df_empty = pd.DataFrame(columns=list(normalized_types))
         df_empty.index = pd.DatetimeIndex([], name="time")
         _NCEI_DAILY_YEAR_CACHE[cache_key] = df_empty.copy()
-        _write_df_to_disk_cache("ncei_daily_year", cache_key, df_empty)
+        if not is_incomplete_year:
+            _write_df_to_disk_cache("ncei_daily_year", cache_key, df_empty)
         return df_empty.copy()
 
     def _find_key(d: dict, candidates: list[str]) -> str | None:
@@ -989,7 +967,8 @@ def _fetch_ncei_daily_year(
             df[dt] = np.nan
 
     _NCEI_DAILY_YEAR_CACHE[cache_key] = df.copy()
-    _write_df_to_disk_cache("ncei_daily_year", cache_key, df)
+    if not is_incomplete_year:
+        _write_df_to_disk_cache("ncei_daily_year", cache_key, df)
 
     return df.copy()
 
@@ -1643,7 +1622,8 @@ def get_weather_features(
     Features:
       - Variables horarias vienen de ISD-Lite / sensores de LaGuardia.
       - Tmax/Tmin/Tmean del día X se calculan desde 00:00 hasta 23:00.
-      - No incluye features de forecast.
+      - Incluye columnas hrrr_* reservadas para forecast real run-exact.
+        Mientras no exista fuente run/init auditable, estas columnas quedan NaN.
     """
     city_key = city.lower().strip()
 
@@ -2325,7 +2305,7 @@ def get_weather_features(
         "daylight_hours_plus1": _safe(daylight_hours_plus1),
         "daylight_delta_plus1_minus_x": _safe(daylight_delta_plus1_minus_x),
 
-        # Forecast real HRRR (via archivo historico/fallback API)
+        # Forecast real HRRR reservado para run-exact auditable.
         "hrrr_forecast_available": _safe(hrrr.get("hrrr_forecast_available", np.nan)),
         "hrrr_fallback_used": _safe(hrrr.get("hrrr_fallback_used", np.nan)),
         "hrrr_run_init_utc_hour": _safe(hrrr.get("hrrr_run_init_utc_hour", np.nan)),
