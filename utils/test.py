@@ -161,7 +161,7 @@ def load_function(module_name: str, function_name: str):
     if not callable(fn):
         raise RuntimeError(f"'{module_name}.{function_name}' existe pero no es callable.")
 
-    return fn
+    return module, fn
 
 
 def function_accepts_kwarg(fn, kwarg_name: str) -> bool:
@@ -446,6 +446,7 @@ def run_inference_leakage_check(
     fn,
     args,
     dates: list[date],
+    contract_cfg: dict[str, Any],
 ) -> dict[str, Any]:
     if not args.run_inference_leakage_check:
         return {
@@ -491,7 +492,7 @@ def run_inference_leakage_check(
             continue
 
         keys = {str(k) for k in features.keys()}
-        leaked = sorted(keys & {"t_max_x+1"})
+        leaked = sorted(keys & {contract_cfg["target_key"]})
 
         if leaked:
             failures.append({
@@ -573,7 +574,99 @@ def strict_allowed_missing_keys() -> set[str]:
     }
 
 
-def sprint3_required_feature_keys(include_target: bool) -> set[str]:
+def _normalize_string_set(value: Any, fallback: set[str]) -> set[str]:
+    if isinstance(value, (set, list, tuple)):
+        out = set()
+        for item in value:
+            text = str(item).strip()
+            if text:
+                out.add(text)
+        if out:
+            return out
+    return set(fallback)
+
+
+def _normalize_positive_int(value: Any, fallback: int) -> int:
+    if isinstance(value, (int, np.integer)):
+        return int(value) if int(value) > 0 else fallback
+    if isinstance(value, str) and value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else fallback
+    return fallback
+
+
+def resolve_contract_config(module, args) -> dict[str, Any]:
+    fallback_target_key = "t_max_x+1"
+    fallback_train_count = 133
+    fallback_inference_count = 132
+    fallback_allowed_non_numeric = {"season", "ciudad"}
+    fallback_allowed_missing = strict_allowed_missing_keys()
+
+    exported_version = getattr(module, "FEATURE_CONTRACT_VERSION", None)
+    exported_target_key = getattr(module, "FEATURE_TARGET_KEY", None)
+    exported_train_count = getattr(module, "FEATURE_COUNT_TRAIN_MODE", None)
+    exported_inference_count = getattr(module, "FEATURE_COUNT_INFERENCE_MODE", None)
+    exported_allowed_non_numeric = getattr(module, "FEATURE_ALLOWED_NON_NUMERIC", None)
+    exported_allowed_missing = getattr(module, "FEATURE_ALLOWED_MISSING", None)
+    exported_supported_cities = getattr(module, "SUPPORTED_CITIES", None)
+
+    used_exports = any(
+        value is not None
+        for value in [
+            exported_version,
+            exported_target_key,
+            exported_train_count,
+            exported_inference_count,
+            exported_allowed_non_numeric,
+            exported_allowed_missing,
+            exported_supported_cities,
+        ]
+    )
+
+    target_key = str(exported_target_key).strip() if exported_target_key is not None else ""
+    if not target_key:
+        target_key = fallback_target_key
+
+    train_count_source = args.expected_feature_count_train
+    if train_count_source is None:
+        train_count_source = exported_train_count
+    if train_count_source is None:
+        train_count_source = fallback_train_count
+
+    inference_count_source = args.expected_feature_count_inference
+    if inference_count_source is None:
+        inference_count_source = exported_inference_count
+    if inference_count_source is None:
+        inference_count_source = fallback_inference_count
+
+    train_count = _normalize_positive_int(train_count_source, fallback_train_count)
+    inference_count = _normalize_positive_int(inference_count_source, fallback_inference_count)
+
+    allowed_non_numeric = _normalize_string_set(
+        exported_allowed_non_numeric,
+        fallback_allowed_non_numeric,
+    )
+    allowed_missing = _normalize_string_set(exported_allowed_missing, fallback_allowed_missing)
+
+    contract_version = str(exported_version).strip() if exported_version is not None else ""
+    if not contract_version:
+        contract_version = "fallback_v1"
+
+    supported_cities = _normalize_string_set(exported_supported_cities, set())
+
+    return {
+        "source": "module_exports" if used_exports else "fallback",
+        "contract_version": contract_version,
+        "target_key": target_key,
+        "expected_feature_count_train": train_count,
+        "expected_feature_count_inference": inference_count,
+        "allowed_non_numeric": allowed_non_numeric,
+        "allowed_missing": allowed_missing,
+        "supported_cities": supported_cities,
+    }
+
+
+def sprint3_required_feature_keys(include_target: bool, target_key: str = "t_max_x+1") -> set[str]:
     keys = {
         "Tmax_so_far_23h_x",
         "Tmin_so_far_23h_x",
@@ -627,7 +720,7 @@ def sprint3_required_feature_keys(include_target: bool) -> set[str]:
     }
 
     if include_target:
-        keys.add("t_max_x+1")
+        keys.add(target_key)
 
     return keys
 
@@ -665,13 +758,14 @@ def validate_build_climate_row(
     features: dict[str, Any],
     args,
     resolved_mode: str,
+    contract_cfg: dict[str, Any],
 ) -> list[str]:
     failures = []
     has_target = resolved_mode == "train_mode"
     expected_count = (
-        args.expected_feature_count_train
+        contract_cfg["expected_feature_count_train"]
         if has_target
-        else args.expected_feature_count_inference
+        else contract_cfg["expected_feature_count_inference"]
     )
 
     if expected_count is not None and len(features) != expected_count:
@@ -679,7 +773,8 @@ def validate_build_climate_row(
             f"feature_count={len(features)} != expected_feature_count={expected_count}"
         )
 
-    required_keys = sprint3_required_feature_keys(include_target=has_target)
+    target_key = contract_cfg["target_key"]
+    required_keys = sprint3_required_feature_keys(include_target=has_target, target_key=target_key)
     missing_keys = sorted(required_keys - set(features.keys()))
 
     if missing_keys:
@@ -687,11 +782,11 @@ def validate_build_climate_row(
             "missing_required_keys=" + ", ".join(missing_keys[:25])
         )
 
-    if has_target and "t_max_x+1" not in features:
-        failures.append("train_mode missing t_max_x+1")
+    if has_target and target_key not in features:
+        failures.append(f"train_mode missing {target_key}")
 
-    if not has_target and "t_max_x+1" in features:
-        failures.append("inference_mode must not include t_max_x+1")
+    if not has_target and target_key in features:
+        failures.append(f"inference_mode must not include {target_key}")
 
     ciudad = features.get("ciudad")
     if not isinstance(ciudad, str) or ciudad.strip().lower() != args.city.strip().lower():
@@ -723,12 +818,13 @@ def validate_build_climate_row(
         elif season != month_to_season[month_int]:
             failures.append(f"season/month mismatch: season={season!r} month={month!r}")
 
-    null_allowed = strict_allowed_missing_keys()
+    null_allowed = contract_cfg["allowed_missing"]
+    allowed_non_numeric = contract_cfg["allowed_non_numeric"]
     if args.strict:
         unexpected_nulls = sorted(
             key
             for key, value in features.items()
-            if is_null(value) and key not in {"season", "ciudad"} and key not in null_allowed
+            if is_null(value) and key not in allowed_non_numeric and key not in null_allowed
         )
         if unexpected_nulls:
             failures.append(
@@ -808,6 +904,7 @@ def run_train_inference_parity_check(
     fn,
     args,
     dates: list[date],
+    contract_cfg: dict[str, Any],
 ) -> dict[str, Any]:
     if not args.run_train_inference_parity_check:
         return {
@@ -888,11 +985,13 @@ def run_train_inference_parity_check(
                 features={str(k): v for k, v in train_features.items()},
                 args=args,
                 resolved_mode="train_mode",
+                contract_cfg=contract_cfg,
             )
             inference_contract_failures = validate_build_climate_row(
                 features={str(k): v for k, v in inference_features.items()},
                 args=args,
                 resolved_mode="inference_mode",
+                contract_cfg=contract_cfg,
             )
 
             if train_contract_failures or inference_contract_failures:
@@ -904,7 +1003,7 @@ def run_train_inference_parity_check(
                 })
                 continue
 
-        train_keys_without_target = set(train_features.keys()) - {"t_max_x+1"}
+        train_keys_without_target = set(train_features.keys()) - {contract_cfg["target_key"]}
         inference_keys = set(inference_features.keys())
 
         if train_keys_without_target != inference_keys:
@@ -1107,15 +1206,16 @@ def main() -> int:
     ap.add_argument("--allow-schema-variance", action="store_true")
     ap.add_argument("--allow-non-finite", action="store_true")
     ap.add_argument("--enforce-build-climate-contract", type=str2bool, default=True)
-    ap.add_argument("--expected-feature-count-train", type=int, default=133)
-    ap.add_argument("--expected-feature-count-inference", type=int, default=132)
+    ap.add_argument("--expected-feature-count-train", type=int, default=None)
+    ap.add_argument("--expected-feature-count-inference", type=int, default=None)
 
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    fn = load_function(args.module, args.function)
+    module, fn = load_function(args.module, args.function)
+    contract_cfg = resolve_contract_config(module, args)
     function_kwargs = build_weather_kwargs(
         args=args,
         fn=fn,
@@ -1140,6 +1240,14 @@ def main() -> int:
     print(f"strict={args.strict}")
     print(f"mode={args.mode}")
     print(f"function kwargs={function_kwargs}")
+    print(f"contract_source={contract_cfg['source']}")
+    print(f"contract_version={contract_cfg['contract_version']}")
+    print(f"contract_target_key={contract_cfg['target_key']}")
+    print(
+        "contract_expected_counts="
+        f"train:{contract_cfg['expected_feature_count_train']} "
+        f"inference:{contract_cfg['expected_feature_count_inference']}"
+    )
     print(f"Output dir: {out_dir.resolve()}")
     print("No hardcoded EXPECTED_FEATURE_KEYS.\n")
 
@@ -1231,6 +1339,7 @@ def main() -> int:
                         features=features,
                         args=args,
                         resolved_mode=resolved_mode,
+                        contract_cfg=contract_cfg,
                     )
                     if strict_row_failures:
                         strict_contract_failures.append({
@@ -1345,11 +1454,13 @@ def main() -> int:
         fn=fn,
         args=args,
         dates=dates,
+        contract_cfg=contract_cfg,
     )
     train_inference_parity_check = run_train_inference_parity_check(
         fn=fn,
         args=args,
         dates=dates,
+        contract_cfg=contract_cfg,
     )
     strict_contract_df = pd.DataFrame([
         {
@@ -1380,8 +1491,14 @@ def main() -> int:
         "compute_td_anomaly": args.compute_td_anomaly,
         "function_kwargs": function_kwargs,
         "enforce_build_climate_contract": build_contract_target,
-        "expected_feature_count_train": args.expected_feature_count_train,
-        "expected_feature_count_inference": args.expected_feature_count_inference,
+        "contract_source": contract_cfg["source"],
+        "contract_version": contract_cfg["contract_version"],
+        "contract_target_key": contract_cfg["target_key"],
+        "contract_allowed_non_numeric": sorted(contract_cfg["allowed_non_numeric"]),
+        "contract_allowed_missing_count": len(contract_cfg["allowed_missing"]),
+        "contract_supported_cities": sorted(contract_cfg["supported_cities"]),
+        "expected_feature_count_train": contract_cfg["expected_feature_count_train"],
+        "expected_feature_count_inference": contract_cfg["expected_feature_count_inference"],
         "samples_total": total,
         "ok_returns": ok_count,
         "empty_returns": empty_count,
@@ -1533,7 +1650,7 @@ def main() -> int:
 
     if inference_leakage_check.get("failures", 0) > 0:
         failures.append(
-            "inference_mode devolvió el target oficial t_max_x+1."
+            f"inference_mode devolvió el target oficial {contract_cfg['target_key']}."
         )
 
     if train_inference_parity_check.get("errors"):

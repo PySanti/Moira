@@ -109,10 +109,27 @@ def date_range_inclusive(start: date, end: date) -> list[date]:
 # Import dinámico del módulo climático
 # ----------------------------
 
-def import_weather_module(module_name: str):
+def ensure_project_root_on_path(script_file: str) -> None:
+    script_path = Path(script_file).resolve()
+    candidate_paths = [script_path.parent, script_path.parent.parent, Path.cwd().resolve()]
+
+    for path in candidate_paths:
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
+
+def import_weather_module(module_name: str, script_file: str):
+    ensure_project_root_on_path(script_file)
+
     try:
         return importlib.import_module(module_name)
     except Exception as exc:
+        if not module_name.startswith("utils."):
+            try:
+                return importlib.import_module(f"utils.{module_name}")
+            except Exception:
+                pass
         raise RuntimeError(
             f"No pude importar el módulo '{module_name}'. "
             "Ejecuta el script desde la raíz del proyecto o ajusta PYTHONPATH."
@@ -154,6 +171,42 @@ def filter_kwargs_for_function(fn: Callable, kwargs: dict[str, Any]) -> dict[str
         for k, v in kwargs.items()
         if accepts_kwarg(fn, k)
     }
+
+
+def collect_builder_metadata(module, get_features_fn: Callable, get_features_kwargs: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "module_name": getattr(module, "__name__", None),
+        "module_file": getattr(module, "__file__", None),
+    }
+
+    exported_keys = [
+        "FEATURE_CONTRACT_VERSION",
+        "FEATURE_COUNT_TRAIN_MODE",
+        "FEATURE_COUNT_INFERENCE_MODE",
+        "FEATURE_TARGET_KEY",
+        "FEATURE_ALLOWED_NON_NUMERIC",
+        "FEATURE_ALLOWED_MISSING",
+        "SUPPORTED_CITIES",
+        "DEFAULT_NEAREST_TOLERANCE_HOURS",
+    ]
+    for key in exported_keys:
+        if hasattr(module, key):
+            value = getattr(module, key)
+            if isinstance(value, (set, list, tuple)):
+                out[key.lower()] = sorted(str(item) for item in value)
+            else:
+                out[key.lower()] = value
+
+    cache_fn = getattr(module, "cache_info", None)
+    out["cache_info_before"] = cache_fn() if callable(cache_fn) else None
+
+    try:
+        out["get_weather_features_signature"] = str(inspect.signature(get_features_fn))
+    except Exception:
+        out["get_weather_features_signature"] = None
+
+    out["get_weather_features_kwargs_effective"] = dict(get_features_kwargs)
+    return out
 
 
 # ----------------------------
@@ -502,6 +555,7 @@ def main() -> int:
 
     # Auditoría/debug.
     ap.add_argument("--dry-run", type=str2bool, default=False)
+    ap.add_argument("--dry-run-probe", type=str2bool, default=False)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--checkpoint-every", type=int, default=100)
 
@@ -518,18 +572,8 @@ def main() -> int:
             "Ej: history-start=1980-01-01, start=1983-01-01."
         )
 
-    module = import_weather_module(args.module)
+    module = import_weather_module(args.module, script_file=__file__)
     get_features_fn = get_callable(module, args.function)
-
-    # Backup opcional antes de tocar archivos existentes.
-    backup_dataset = maybe_backup_file(output_path, backup_dir)
-    backup_failed = maybe_backup_file(failed_output_path, backup_dir)
-
-    if backup_dataset:
-        print(f"[BACKUP] dataset -> {backup_dataset}")
-
-    if backup_failed:
-        print(f"[BACKUP] failed rows -> {backup_failed}")
 
     existing_df = load_existing_dataset(output_path)
     existing_dates = get_existing_dates(existing_df)
@@ -546,17 +590,6 @@ def main() -> int:
     if args.limit is not None:
         dates_to_process = dates_to_process[:args.limit]
 
-    preload_info = run_preload_if_available(
-        module=module,
-        city=args.city,
-        history_start=args.history_start,
-        end=args.end,
-        execution_hour=args.execution_hour,
-        nearest_tolerance_hours=args.nearest_tolerance_hours,
-        include_target=args.include_target,
-        preload=args.preload,
-    )
-
     get_features_kwargs_raw = {
         "strict": args.strict,
         "execution_hour": args.execution_hour,
@@ -572,6 +605,18 @@ def main() -> int:
         get_features_fn,
         get_features_kwargs_raw,
     )
+    builder_metadata = collect_builder_metadata(module, get_features_fn, get_features_kwargs)
+    contract_version = builder_metadata.get("feature_contract_version")
+
+    supported_cities_raw = getattr(module, "SUPPORTED_CITIES", None)
+    if isinstance(supported_cities_raw, (set, list, tuple)):
+        supported_cities = {str(city).strip().lower() for city in supported_cities_raw if str(city).strip()}
+        if supported_cities and args.city.strip().lower() not in supported_cities:
+            supported_display = ", ".join(sorted(supported_cities))
+            raise SystemExit(
+                f"[ERROR] city='{args.city}' no está soportada por {args.module}. "
+                f"SUPPORTED_CITIES={supported_display}"
+            )
 
     print("\n=== MINER CONFIG ===")
     print(f"module: {args.module}")
@@ -590,6 +635,7 @@ def main() -> int:
     print(f"total_dates_in_range: {len(all_dates)}")
     print(f"dates_to_process: {len(dates_to_process)}")
     print(f"get_weather_features kwargs: {get_features_kwargs}")
+    print(f"contract_version: {contract_version}")
     print(f"dry_run: {args.dry_run}\n")
 
     if not dates_to_process:
@@ -602,7 +648,45 @@ def main() -> int:
             print(f"- {d.isoformat()} ({date_to_function_str(d, args.date_format)})")
         if len(dates_to_process) > 20:
             print(f"... y {len(dates_to_process) - 20} más")
+        if args.dry_run_probe:
+            probe_date = dates_to_process[0]
+            probe_date_str = date_to_function_str(probe_date, args.date_format)
+            _, probe_attempts, _, probe_error_type, probe_error_msg = call_with_retry(
+                fn=get_features_fn,
+                city=args.city,
+                date_str=probe_date_str,
+                kwargs=get_features_kwargs,
+                max_retries=args.max_retries,
+                backoff_base_sec=args.backoff_base_sec,
+                backoff_jitter_sec=args.backoff_jitter_sec,
+            )
+            print(
+                "[DRY RUN PROBE] "
+                f"date={probe_date.isoformat()} attempts={probe_attempts} "
+                f"error_type={probe_error_type} error_msg={probe_error_msg}"
+            )
         return 0
+
+    # Backup opcional antes de tocar archivos existentes.
+    backup_dataset = maybe_backup_file(output_path, backup_dir)
+    backup_failed = maybe_backup_file(failed_output_path, backup_dir)
+
+    if backup_dataset:
+        print(f"[BACKUP] dataset -> {backup_dataset}")
+
+    if backup_failed:
+        print(f"[BACKUP] failed rows -> {backup_failed}")
+
+    preload_info = run_preload_if_available(
+        module=module,
+        city=args.city,
+        history_start=args.history_start,
+        end=args.end,
+        execution_hour=args.execution_hour,
+        nearest_tolerance_hours=args.nearest_tolerance_hours,
+        include_target=args.include_target,
+        preload=args.preload,
+    )
 
     # Estado.
     t_start = time.perf_counter()
@@ -615,8 +699,12 @@ def main() -> int:
 
     error_counts = Counter()
     schema_counts = Counter()
+    failed_by_year = Counter()
+    failed_by_month = Counter()
+    failed_by_temporal_bucket = Counter()
     attempts_list = []
     backoff_slept_total = 0.0
+    run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
 
     rows_buffer: list[dict[str, Any]] = []
     failed_buffer: list[dict[str, Any]] = []
@@ -630,6 +718,25 @@ def main() -> int:
     for d in dates_to_process:
         processed += 1
         ds = date_to_function_str(d, args.date_format)
+        temporal_bucket = "train_val_period" if d.year < 2021 else "test_holdout_period"
+        base_failed_context = {
+            "run_id": run_id,
+            "date": d.isoformat(),
+            "date_str": ds,
+            "year": d.year,
+            "month": d.month,
+            "day": d.day,
+            "day_of_year": int(d.strftime("%j")),
+            "iso_week": int(d.isocalendar()[1]),
+            "temporal_bucket": temporal_bucket,
+            "mode": "train_mode" if args.include_target else "inference_mode",
+            "include_target": bool(args.include_target),
+            "strict": bool(args.strict),
+            "nearest_tolerance_hours": args.nearest_tolerance_hours,
+            "module": args.module,
+            "contract_version": contract_version,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
 
         elapsed = time.perf_counter() - t_start
         print_progress(
@@ -658,16 +765,17 @@ def main() -> int:
 
         if err_type is not None:
             error_counts[err_type] += 1
+            failed_by_year[str(d.year)] += 1
+            failed_by_month[f"{d.year:04d}-{d.month:02d}"] += 1
+            failed_by_temporal_bucket[temporal_bucket] += 1
 
             failed_buffer.append({
-                "date": d.isoformat(),
-                "date_str": ds,
+                **base_failed_context,
                 "status": "ERROR",
                 "error_type": err_type,
                 "error_msg": err_msg,
                 "attempts": attempts,
                 "slept_backoff_sec": slept,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
             })
 
             print()
@@ -676,16 +784,17 @@ def main() -> int:
         else:
             if not isinstance(features, dict):
                 error_counts["INVALID_RETURN_TYPE"] += 1
+                failed_by_year[str(d.year)] += 1
+                failed_by_month[f"{d.year:04d}-{d.month:02d}"] += 1
+                failed_by_temporal_bucket[temporal_bucket] += 1
 
                 failed_buffer.append({
-                    "date": d.isoformat(),
-                    "date_str": ds,
+                    **base_failed_context,
                     "status": "ERROR",
                     "error_type": "INVALID_RETURN_TYPE",
                     "error_msg": f"Expected dict, got {type(features).__name__}",
                     "attempts": attempts,
                     "slept_backoff_sec": slept,
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
                 })
 
                 print()
@@ -693,16 +802,17 @@ def main() -> int:
 
             elif len(features) == 0:
                 empty_returns += 1
+                failed_by_year[str(d.year)] += 1
+                failed_by_month[f"{d.year:04d}-{d.month:02d}"] += 1
+                failed_by_temporal_bucket[temporal_bucket] += 1
 
                 failed_buffer.append({
-                    "date": d.isoformat(),
-                    "date_str": ds,
+                    **base_failed_context,
                     "status": "EMPTY",
                     "error_type": "EMPTY_RETURN",
                     "error_msg": "get_weather_features returned {}",
                     "attempts": attempts,
                     "slept_backoff_sec": slept,
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
                 })
 
                 print()
@@ -726,17 +836,18 @@ def main() -> int:
                 if not schema_ok:
                     schema_mismatch_count += 1
                     error_counts["SCHEMA_MISMATCH"] += 1
+                    failed_by_year[str(d.year)] += 1
+                    failed_by_month[f"{d.year:04d}-{d.month:02d}"] += 1
+                    failed_by_temporal_bucket[temporal_bucket] += 1
 
                     failed_buffer.append({
-                        "date": d.isoformat(),
-                        "date_str": ds,
+                        **base_failed_context,
                         "status": "ERROR",
                         "error_type": "SCHEMA_MISMATCH",
                         "error_msg": schema_msg,
                         "attempts": attempts,
                         "slept_backoff_sec": slept,
                         "schema_hash": schema_hash,
-                        "created_at": datetime.now().isoformat(timespec="seconds"),
                     })
 
                     print()
@@ -746,16 +857,17 @@ def main() -> int:
                     if schema_msg:
                         # Se permite pero queda auditado.
                         schema_mismatch_count += 1
+                        failed_by_year[str(d.year)] += 1
+                        failed_by_month[f"{d.year:04d}-{d.month:02d}"] += 1
+                        failed_by_temporal_bucket[temporal_bucket] += 1
                         failed_buffer.append({
-                            "date": d.isoformat(),
-                            "date_str": ds,
+                            **base_failed_context,
                             "status": "SCHEMA_WARNING",
                             "error_type": "SCHEMA_MISMATCH_ALLOWED",
                             "error_msg": schema_msg,
                             "attempts": attempts,
                             "slept_backoff_sec": slept,
                             "schema_hash": schema_hash,
-                            "created_at": datetime.now().isoformat(timespec="seconds"),
                         })
 
                     ok_new += 1
@@ -809,8 +921,17 @@ def main() -> int:
         failed_buffer.clear()
 
     elapsed = time.perf_counter() - t_start
+    cache_fn = getattr(module, "cache_info", None)
+    cache_info_after = cache_fn() if callable(cache_fn) else None
+
+    ok_ratio = (ok_new / processed) if processed > 0 else 0.0
+    empty_ratio = (empty_returns / processed) if processed > 0 else 0.0
+    error_total = int(sum(error_counts.values()))
+    error_ratio = (error_total / processed) if processed > 0 else 0.0
+    schema_mismatch_ratio = (schema_mismatch_count / processed) if processed > 0 else 0.0
 
     summary = {
+        "run_id": run_id,
         "module": args.module,
         "function": args.function,
         "city": args.city,
@@ -831,11 +952,18 @@ def main() -> int:
         "processed": int(processed),
         "ok_new_records": int(ok_new),
         "empty_returns": int(empty_returns),
-        "errors_total": int(sum(error_counts.values())),
+        "errors_total": error_total,
         "schema_mismatch_count": int(schema_mismatch_count),
+        "ok_ratio": ok_ratio,
+        "empty_ratio": empty_ratio,
+        "error_ratio": error_ratio,
+        "schema_mismatch_ratio": schema_mismatch_ratio,
         "skipped_existing": int(skipped_existing),
         "error_counts": dict(error_counts),
         "schema_counts": dict(schema_counts),
+        "failed_by_year": dict(failed_by_year),
+        "failed_by_month": dict(failed_by_month),
+        "failed_by_temporal_bucket": dict(failed_by_temporal_bucket),
         "attempts_mean": (
             sum(attempts_list) / len(attempts_list)
             if attempts_list
@@ -849,6 +977,8 @@ def main() -> int:
             else None
         ),
         "get_weather_features_kwargs": get_features_kwargs,
+        "builder_metadata": builder_metadata,
+        "cache_info_after": cache_info_after,
         "allow_schema_variance": args.allow_schema_variance,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }

@@ -5569,10 +5569,10 @@ Esta seccion resume riesgos detectados en la integracion entre `utils/build_clim
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Defaults desalineados de `nearest_tolerance_hours` | build_climate_data + miner + test | Resultados no reproducibles si no se pasa el flag explicitamente | Cambia cobertura de features (especialmente as-of 23h) y tasa de filas vacias | Alta | Alta | Pasar siempre `--nearest-tolerance-hours` en `miner.py` y `test.py` y documentar un unico valor recomendado (actual: `6`) | [x] | Cubierto en builder: `DEFAULT_NEAREST_TOLERANCE_HOURS = 6` para preload + feature builder. |
 | Retorno `{}` con `strict=True` induce sesgo de muestreo | build_climate_data + miner + test | `get_weather_features()` retorna `{}` cuando faltan inputs criticos (ej: `Cloud_23h_x`) | `miner.py` termina excluyendo fechas no aleatorias; el dataset queda sesgado hacia dias con mejor cobertura; `test.py` puede fallar por `empty_ratio` | Media | Alta | Persistir y analizar `failed_rows` como parte del pipeline; decidir politica (reintentos, tolerancias, o `strict` diferenciado train vs inference) | [x] | Mitigado en builder: `Cloud_23h_x` y otros faltantes puntuales pasan a imputacion; en muestra 120: `empty_returns=0`. |
-| Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | [x] | Cubierto en builder: `FEATURE_CONTRACT_VERSION` + validacion interna de conteo y target por modo. Pendiente sincronizar `test.py` para `unexpected_nulls`. |
+| Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | [x] | Cubierto en builder y test: `test.py` consume `FEATURE_COUNT_*`, `FEATURE_TARGET_KEY`, `FEATURE_ALLOWED_*` con fallback para modulos genericos. |
 | Inconsistencia de formato de fecha (`date_str`) | build_climate_data + miner + test | El builder espera `%d-%m-%y`; ejecuciones directas con ISO fallan o generan fechas incorrectas | Errores de ejecucion o mineria con fechas desplazadas | Media | Media | Estandarizar input a ISO en CLI (`miner.py`/`test.py`) y convertir en un solo lugar; documentar formato aceptado para llamadas directas | [x] | Cubierto en builder: parseo dual `%d-%m-%y` y `%Y-%m-%d`. |
 | Ciudad soportada efectivamente solo `new york` | build_climate_data + miner + test | `CITY_COORDS` expone varias ciudades pero el builder hard-fail fuera de `new york` | Confusion operativa: `miner.py`/`test.py` aceptan `--city` pero el builder no soporta varias estaciones | Alta | Media | Documentar explicitamente la limitacion actual y/o validar antes en CLI para fallar con mensaje claro | [x] | Cubierto en builder: `SUPPORTED_CITIES={"new york"}` y validacion explicita en ambos entrypoints. |
-| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | [ ] | No cubierto en este ciclo: requiere cambios/documentacion en `miner.py`. |
+| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | [x] | Cubierto en `miner.py`: se agrega fallback de `sys.path` basado en `__file__` para soportar script directo y modulo. |
 | Cache local afecta reproducibilidad y el git status | build_climate_data + miner + test | `.weather_cache/` puede cambiar entre corridas; accidentalmente se versionan borrados/cambios | Dificulta comparar resultados y contamina diffs/PRs | Media | Media | Mantener `.weather_cache/` ignorado y controlar ubicacion via `WEATHER_CACHE_DIR` o deshabilitar con `WEATHER_DISABLE_DISK_CACHE=1` | [ ] | No cubierto en este ciclo: riesgo operativo/documental, no de logica principal del builder. |
 | Fallback de precipitacion puede sobrecontar (1h vs 6h) | build_climate_data + miner | Si se suman ventanas de 6h sin garantizar no solapamiento, `Precip_*` puede inflarse | Ruido sistematico en feature de precip; afecta entrenamiento | Baja | Media | Definir una unica estrategia (preferir 1h con umbral; si no, 6h sin sumar solapes) y cubrir con un test de consistencia | [x] | Cubierto en builder: fallback `Precip_6h` usa ultimo valor valido en vez de suma. |
 
@@ -5661,6 +5661,109 @@ Resultados observados:
 - `ok_returns=120` y `empty_returns=0` en train e inference para la muestra de 120 fechas.
 - `feature_union_count=133` en `train_mode` y `feature_union_count=132` en `inference_mode`.
 - `target_like_key_count=0` en inferencia (sin leakage del target).
-- Persisten `strict_contract_failure_count` en `utils/test.py` por su politica local de `unexpected_nulls`; se requiere sincronizar `test.py` con la nueva politica de faltantes permitidos del builder.
+- En `utils/test.py` ya no persisten `strict_contract_failure_count` por desalineacion de nulls permitidos; ahora sincroniza contrato desde el builder con fallback seguro.
+
+</details>
+
+<details open>
+<summary><strong>Ultimos cambios aplicados (test + miner)</strong></summary>
+
+Archivos modificados:
+
+```text
+./utils/test.py
+./utils/miner.py
+```
+
+Cambios implementados en `utils/test.py`:
+
+1. `load_function(...)` ahora retorna modulo y funcion para resolver contrato exportado.
+2. Se agrego `resolve_contract_config(...)` con prioridad: CLI explicito > constantes `FEATURE_*` del modulo > fallback local.
+3. Se reemplazo hardcode de target en leakage/paridad por `FEATURE_TARGET_KEY` efectivo.
+4. Se sincronizo validacion estricta de nulls permitidos y no numericos permitidos con `FEATURE_ALLOWED_MISSING` y `FEATURE_ALLOWED_NON_NUMERIC`.
+5. Se sincronizaron conteos esperados por modo con `FEATURE_COUNT_TRAIN_MODE` / `FEATURE_COUNT_INFERENCE_MODE`.
+6. El `summary` ahora reporta `contract_source`, `contract_version`, `contract_target_key` y politica efectiva.
+
+Cambios implementados en `utils/miner.py`:
+
+1. Import robusto (`import_weather_module(..., script_file=__file__)`) con insercion defensiva de rutas para soportar `python utils/miner.py ...` y `python -m utils.miner ...`.
+2. `--dry-run true` ahora evita side effects (sin backups, sin preload y sin escrituras); opcion `--dry-run-probe` para smoke controlado.
+3. Validacion temprana de ciudad con `SUPPORTED_CITIES` cuando el modulo la exporta.
+4. Metadata enriquecida con contrato y cache (`builder_metadata`, `cache_info_after`, firma y kwargs efectivos).
+5. `failed_rows` enriquecido con contexto temporal y operativo (`run_id`, year/month/day, `temporal_bucket`, `contract_version`, etc.).
+6. Summary final de miner agrega ratios y agregados de fallos por tiempo.
+
+Validacion ejecutada:
+
+```bash
+python -m py_compile utils/test.py utils/miner.py utils/build_climate_data.py
+
+python utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 120 \
+  --strict true \
+  --mode train_mode \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/test_miner_fix_train
+
+python utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 120 \
+  --strict true \
+  --mode inference_mode \
+  --include-target false \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/test_miner_fix_inference
+
+python utils/miner.py \
+  --module utils.build_climate_data \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 1983-01-10 \
+  --history-start 1980-01-01 \
+  --dry-run true \
+  --limit 5
+
+python -m utils.miner \
+  --module utils.build_climate_data \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 1983-01-10 \
+  --history-start 1980-01-01 \
+  --dry-run true \
+  --limit 5
+
+python -m utils.miner \
+  --module utils.build_climate_data \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 1983-01-10 \
+  --history-start 1980-01-01 \
+  --output ./test-reports/sprint3-v0/miner_fix/dataset.csv \
+  --failed-output ./test-reports/sprint3-v0/miner_fix/failed_rows.csv \
+  --metadata-output ./test-reports/sprint3-v0/miner_fix/metadata.json \
+  --strict true \
+  --preload true \
+  --nearest-tolerance-hours 6 \
+  --include-target true \
+  --skip-existing false
+```
+
+Resultados observados:
+
+- `utils/test.py` train: `ok_returns=120`, `empty_returns=0`, `feature_union_count=133`, `strict_contract_failure_count=0`.
+- `utils/test.py` inference: `ok_returns=120`, `empty_returns=0`, `feature_union_count=132`, `target_like_key_count=0`, `strict_contract_failure_count=0`.
+- `utils/miner.py --dry-run true` y `python -m utils.miner --dry-run true` ejecutan sin errores de import y sin side effects.
+- Corrida corta real de `miner`: `processed=10`, `ok_new_records=10`, `errors_total=0`, `schema_mismatch_count=0`.
 
 </details>
