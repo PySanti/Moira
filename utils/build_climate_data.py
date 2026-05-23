@@ -53,6 +53,7 @@ CITY_COORDS = {
 }
 
 DEFAULT_HISTORY_START_DATE = "1980-01-01"
+ISD_DAILY_23H_CACHE_VERSION = 2
 
 # Cache persistente.
 # Puedes cambiar la carpeta con:
@@ -173,14 +174,49 @@ def _linear_slope(values: np.ndarray | list[float]) -> float:
         return np.nan
 
 
-def _mean_if_enough(values: np.ndarray | list[float], min_count: int) -> float:
+def _stat_if_enough(
+    values: np.ndarray | list[float],
+    min_count: int,
+    stat: str,
+) -> float:
     values = np.asarray(values, dtype=float)
     valid = values[np.isfinite(values)]
 
     if len(valid) < min_count:
         return np.nan
 
-    return float(valid.mean())
+    if stat == "mean":
+        return float(valid.mean())
+
+    if stat == "std":
+        return float(valid.std(ddof=0))
+
+    if stat == "min":
+        return float(valid.min())
+
+    if stat == "max":
+        return float(valid.max())
+
+    if stat == "sum":
+        return float(valid.sum())
+
+    raise ValueError(f"stat no soportado: {stat}")
+
+
+def _mean_if_enough(values: np.ndarray | list[float], min_count: int) -> float:
+    return _stat_if_enough(values=values, min_count=min_count, stat="mean")
+
+
+def _completed_daily_values(
+    df: pd.DataFrame,
+    target_ts: pd.Timestamp,
+    col: str,
+    days: int,
+) -> list[float]:
+    return [
+        _df_value(df, target_ts - pd.Timedelta(days=i), col)
+        for i in range(days, 0, -1)
+    ]
 
 
 def _season_from_month(month: int) -> str:
@@ -266,8 +302,11 @@ def _climatology_stats(
     if hist.empty:
         return {
             "mean": np.nan,
+            "median": np.nan,
+            "std": np.nan,
             "p10": np.nan,
             "p90": np.nan,
+            "iqr": np.nan,
             "n": 0,
         }
 
@@ -280,15 +319,21 @@ def _climatology_stats(
     if len(selected) < min_records:
         return {
             "mean": np.nan,
+            "median": np.nan,
+            "std": np.nan,
             "p10": np.nan,
             "p90": np.nan,
+            "iqr": np.nan,
             "n": int(len(selected)),
         }
 
     return {
         "mean": float(selected.mean()),
+        "median": float(selected.median()),
+        "std": float(selected.std(ddof=0)),
         "p10": float(selected.quantile(0.10)),
         "p90": float(selected.quantile(0.90)),
+        "iqr": float(selected.quantile(0.75) - selected.quantile(0.25)),
         "n": int(len(selected)),
     }
 
@@ -331,6 +376,171 @@ def _precip_sum_until_execution(day_rows: pd.DataFrame) -> float:
         return float(p6.sum())
 
     return np.nan
+
+
+def _rows_within_last_hours(
+    day_rows: pd.DataFrame,
+    execution_dt: pd.Timestamp,
+    hours: int,
+) -> pd.DataFrame:
+    if day_rows.empty:
+        return day_rows.copy()
+
+    start_dt = execution_dt - pd.Timedelta(hours=hours)
+
+    return day_rows[
+        (day_rows["datetime_local"] > start_dt)
+        & (day_rows["datetime_local"] <= execution_dt)
+    ].copy()
+
+
+def _stat_from_rows(
+    rows: pd.DataFrame,
+    col: str,
+    stat: str,
+    min_count: int = 1,
+) -> float:
+    if rows.empty or col not in rows.columns:
+        return np.nan
+
+    values = pd.to_numeric(rows[col], errors="coerce").to_numpy(dtype=float)
+    return _stat_if_enough(values=values, min_count=min_count, stat=stat)
+
+
+def _change_from_rows(rows: pd.DataFrame, col: str, min_count: int = 2) -> float:
+    if rows.empty or col not in rows.columns:
+        return np.nan
+
+    valid = (
+        rows[["datetime_local", col]]
+        .dropna(subset=["datetime_local", col])
+        .sort_values("datetime_local")
+    )
+
+    if len(valid) < min_count:
+        return np.nan
+
+    return float(valid[col].iloc[-1] - valid[col].iloc[0])
+
+
+def _slope_from_rows(rows: pd.DataFrame, col: str, min_count: int = 2) -> float:
+    if rows.empty or col not in rows.columns:
+        return np.nan
+
+    values = (
+        rows[["datetime_local", col]]
+        .dropna(subset=["datetime_local", col])
+        .sort_values("datetime_local")[col]
+        .to_numpy(dtype=float)
+    )
+
+    if len(values) < min_count:
+        return np.nan
+
+    return _linear_slope(values)
+
+
+def _value_at_or_before(
+    hourly: pd.DataFrame,
+    target_dt: pd.Timestamp,
+    col: str,
+    tolerance_hours: int,
+) -> float:
+    if hourly.empty or col not in hourly.columns:
+        return np.nan
+
+    target_dt = pd.to_datetime(target_dt)
+    earliest_dt = target_dt - pd.Timedelta(hours=tolerance_hours)
+
+    obs = hourly[
+        (hourly["datetime_local"] <= target_dt)
+        & (hourly["datetime_local"] >= earliest_dt)
+    ][["datetime_local", col]].dropna(subset=["datetime_local", col])
+
+    if obs.empty:
+        return np.nan
+
+    obs = obs.sort_values("datetime_local")
+    return float(obs[col].iloc[-1])
+
+
+def _precip_sum_from_rows(rows: pd.DataFrame) -> float:
+    if rows.empty:
+        return np.nan
+
+    if "Precip_1h" in rows.columns:
+        p1 = pd.to_numeric(rows["Precip_1h"], errors="coerce").dropna()
+    else:
+        p1 = pd.Series(dtype=float)
+
+    if len(p1) >= 1:
+        return float(p1.sum())
+
+    if "Precip_6h" in rows.columns:
+        p6 = pd.to_numeric(rows["Precip_6h"], errors="coerce").dropna()
+    else:
+        p6 = pd.Series(dtype=float)
+
+    if len(p6) >= 1:
+        return float(p6.sum())
+
+    return np.nan
+
+
+def _positive_precip_hours(rows: pd.DataFrame) -> float:
+    if rows.empty or "Precip_1h" not in rows.columns:
+        return np.nan
+
+    p1 = pd.to_numeric(rows["Precip_1h"], errors="coerce").dropna()
+
+    if len(p1) == 0:
+        return np.nan
+
+    return float((p1 > 0).sum())
+
+
+def _vapor_pressure_hpa(dewpoint_c: float) -> float:
+    if pd.isna(dewpoint_c):
+        return np.nan
+
+    return float(6.112 * np.exp((17.67 * dewpoint_c) / (dewpoint_c + 243.5)))
+
+
+def _daylight_hours(latitude_deg: float, day_of_year: int) -> float:
+    lat_rad = np.deg2rad(latitude_deg)
+    decl_rad = np.deg2rad(
+        23.44 * np.sin(2.0 * np.pi * (284 + day_of_year) / 365.0)
+    )
+
+    cos_hour_angle = -np.tan(lat_rad) * np.tan(decl_rad)
+    cos_hour_angle = np.clip(cos_hour_angle, -1.0, 1.0)
+    hour_angle = np.arccos(cos_hour_angle)
+
+    return float((24.0 / np.pi) * hour_angle)
+
+
+def _recent_directional_streak(
+    values: np.ndarray | list[float],
+    direction: str,
+) -> float:
+    values = np.asarray(values, dtype=float)
+    valid = values[np.isfinite(values)]
+
+    if len(valid) < 2:
+        return np.nan
+
+    diffs = np.diff(valid)
+    streak = 0
+
+    for delta in diffs[::-1]:
+        if direction == "up" and delta > 0:
+            streak += 1
+        elif direction == "down" and delta < 0:
+            streak += 1
+        else:
+            break
+
+    return float(streak)
 
 
 # ---------------- HELPERS NCEI DAILY SUMMARIES / GHCND ----------------
@@ -831,6 +1041,7 @@ def _build_23h_daily_from_hourly(
     Evita hacer un filtro completo del dataframe horario por cada día.
     """
     output_cols = [
+        "Temp_23h",
         "HR_23h",
         "Td_23h",
         "SLP_23h",
@@ -859,6 +1070,7 @@ def _build_23h_daily_from_hourly(
 
     obs_cols = [
         "datetime_local",
+        "Temp_C",
         "HR",
         "Td",
         "SLP",
@@ -891,6 +1103,7 @@ def _build_23h_daily_from_hourly(
 
     out = pd.DataFrame({
         "time": merged["time"],
+        "Temp_23h": merged["Temp_C"],
         "HR_23h": merged["HR"],
         "Td_23h": merged["Td"],
         "SLP_23h": merged["SLP"],
@@ -916,7 +1129,14 @@ def _fetch_isd_daily_23h_year(
     antes se reconstruía todo el histórico 1980->X en cada llamada.
     ahora se calcula una vez por año y se reutiliza.
     """
-    cache_key = (station, int(year), tz, int(execution_hour), int(tolerance_hours))
+    cache_key = (
+        station,
+        int(year),
+        tz,
+        int(execution_hour),
+        int(tolerance_hours),
+        ISD_DAILY_23H_CACHE_VERSION,
+    )
 
     if cache_key in _ISD_DAILY_23H_YEAR_CACHE:
         return _ISD_DAILY_23H_YEAR_CACHE[cache_key].copy()
@@ -982,6 +1202,7 @@ def _fetch_isd_daily_23h_cached(
     if not frames:
         df_empty = pd.DataFrame(
             columns=[
+                "Temp_23h",
                 "HR_23h",
                 "Td_23h",
                 "SLP_23h",
@@ -1188,6 +1409,7 @@ def get_weather_features(
 
     obs_23 = daily_23h.loc[target_ts]
     obs_prev_23 = daily_23h.loc[target_ts - pd.Timedelta(days=1)]
+    obs_prev2_23 = daily_23h.loc[target_ts - pd.Timedelta(days=2)]
 
     # ---------------- FEATURES BASE AS-OF 23H ----------------
 
@@ -1227,6 +1449,10 @@ def get_weather_features(
         else np.nan
     )
 
+    temp_23h_x = obs_23.get("Temp_23h", np.nan)
+    temp_23h_x_minus_1 = obs_prev_23.get("Temp_23h", np.nan)
+    temp_23h_x_minus_2 = obs_prev2_23.get("Temp_23h", np.nan)
+
     hr_23h_x = obs_23.get("HR_23h", np.nan)
     td_23h_x = obs_23.get("Td_23h", np.nan)
     slp_23h_x = obs_23.get("SLP_23h", np.nan)
@@ -1248,6 +1474,158 @@ def get_weather_features(
 
     precip_sum_00_23h_x = _precip_sum_until_execution(day_rows)
 
+    # ---------------- SPRINT 3-v0: DINAMICA INTRADIA ISD-LITE ----------------
+
+    temp_06h_x = _value_at_or_before(
+        hourly,
+        target_ts + pd.Timedelta(hours=6),
+        "Temp_C",
+        nearest_tolerance_hours,
+    )
+    temp_12h_x = _value_at_or_before(
+        hourly,
+        target_ts + pd.Timedelta(hours=12),
+        "Temp_C",
+        nearest_tolerance_hours,
+    )
+    temp_18h_x = _value_at_or_before(
+        hourly,
+        target_ts + pd.Timedelta(hours=18),
+        "Temp_C",
+        nearest_tolerance_hours,
+    )
+    temp_21h_x = _value_at_or_before(
+        hourly,
+        target_ts + pd.Timedelta(hours=21),
+        "Temp_C",
+        nearest_tolerance_hours,
+    )
+
+    temp_change_23h_minus_18h = (
+        temp_23h_x - temp_18h_x
+        if pd.notna(temp_23h_x) and pd.notna(temp_18h_x)
+        else np.nan
+    )
+    temp_change_23h_minus_12h = (
+        temp_23h_x - temp_12h_x
+        if pd.notna(temp_23h_x) and pd.notna(temp_12h_x)
+        else np.nan
+    )
+    temp_change_23h_minus_06h = (
+        temp_23h_x - temp_06h_x
+        if pd.notna(temp_23h_x) and pd.notna(temp_06h_x)
+        else np.nan
+    )
+    temp_change_23h_1d = (
+        temp_23h_x - temp_23h_x_minus_1
+        if pd.notna(temp_23h_x) and pd.notna(temp_23h_x_minus_1)
+        else np.nan
+    )
+
+    rows_last_3h = _rows_within_last_hours(day_rows, execution_dt, hours=3)
+    rows_last_6h = _rows_within_last_hours(day_rows, execution_dt, hours=6)
+    rows_last_12h = _rows_within_last_hours(day_rows, execution_dt, hours=12)
+
+    temp_std_00_23h_x = _stat_from_rows(day_rows, "Temp_C", "std", min_count=2)
+    temp_range_00_23h_x = (
+        tmax_so_far_23h_x - tmin_so_far_23h_x
+        if pd.notna(tmax_so_far_23h_x) and pd.notna(tmin_so_far_23h_x)
+        else np.nan
+    )
+    temp_mean_last_6h = _stat_from_rows(rows_last_6h, "Temp_C", "mean")
+    temp_min_last_6h = _stat_from_rows(rows_last_6h, "Temp_C", "min")
+    temp_max_last_6h = _stat_from_rows(rows_last_6h, "Temp_C", "max")
+    temp_change_last_3h = _change_from_rows(rows_last_3h, "Temp_C")
+    temp_change_last_6h = _change_from_rows(rows_last_6h, "Temp_C")
+    temp_change_last_12h = _change_from_rows(rows_last_12h, "Temp_C")
+    temp_slope_last_6h = _slope_from_rows(rows_last_6h, "Temp_C")
+    temp_slope_last_12h = _slope_from_rows(rows_last_12h, "Temp_C")
+
+    td_mean_00_23h_x = _stat_from_rows(day_rows, "Td", "mean")
+    td_min_00_23h_x = _stat_from_rows(day_rows, "Td", "min")
+    td_max_00_23h_x = _stat_from_rows(day_rows, "Td", "max")
+    td_mean_last_6h = _stat_from_rows(rows_last_6h, "Td", "mean")
+    td_change_last_6h = _change_from_rows(rows_last_6h, "Td")
+
+    hr_mean_00_23h_x = _stat_from_rows(day_rows, "HR", "mean")
+    hr_min_00_23h_x = _stat_from_rows(day_rows, "HR", "min")
+    hr_max_00_23h_x = _stat_from_rows(day_rows, "HR", "max")
+    hr_mean_last_6h = _stat_from_rows(rows_last_6h, "HR", "mean")
+    hr_change_last_6h = _change_from_rows(rows_last_6h, "HR")
+
+    slp_mean_00_23h_x = _stat_from_rows(day_rows, "SLP", "mean")
+    slp_min_00_23h_x = _stat_from_rows(day_rows, "SLP", "min")
+    slp_max_00_23h_x = _stat_from_rows(day_rows, "SLP", "max")
+    slp_20h_x = _value_at_or_before(
+        hourly,
+        execution_dt - pd.Timedelta(hours=3),
+        "SLP",
+        nearest_tolerance_hours,
+    )
+    slp_17h_x = _value_at_or_before(
+        hourly,
+        execution_dt - pd.Timedelta(hours=6),
+        "SLP",
+        nearest_tolerance_hours,
+    )
+    slp_11h_x = _value_at_or_before(
+        hourly,
+        execution_dt - pd.Timedelta(hours=12),
+        "SLP",
+        nearest_tolerance_hours,
+    )
+    slp_change_last_3h = (
+        slp_23h_x - slp_20h_x
+        if pd.notna(slp_23h_x) and pd.notna(slp_20h_x)
+        else np.nan
+    )
+    slp_change_last_6h = (
+        slp_23h_x - slp_17h_x
+        if pd.notna(slp_23h_x) and pd.notna(slp_17h_x)
+        else np.nan
+    )
+    slp_change_last_12h = (
+        slp_23h_x - slp_11h_x
+        if pd.notna(slp_23h_x) and pd.notna(slp_11h_x)
+        else np.nan
+    )
+
+    wind_spd_mean_00_23h_x = _stat_from_rows(day_rows, "WindSpd", "mean")
+    wind_spd_max_00_23h_x = _stat_from_rows(day_rows, "WindSpd", "max")
+    wind_spd_mean_last_6h = _stat_from_rows(rows_last_6h, "WindSpd", "mean")
+    wind_spd_change_last_6h = _change_from_rows(rows_last_6h, "WindSpd")
+
+    cloud_mean_00_23h_x = _stat_from_rows(day_rows, "Cloud", "mean")
+    cloud_max_00_23h_x = _stat_from_rows(day_rows, "Cloud", "max")
+    cloud_mean_last_6h = _stat_from_rows(rows_last_6h, "Cloud", "mean")
+    cloud_change_last_6h = _change_from_rows(rows_last_6h, "Cloud")
+
+    precip_sum_last_6h = _precip_sum_from_rows(rows_last_6h)
+    precip_sum_last_12h = _precip_sum_from_rows(rows_last_12h)
+    precip_positive_hours_00_23h = _positive_precip_hours(day_rows)
+    precip_positive_hours_last_6h = _positive_precip_hours(rows_last_6h)
+    precip_flag_00_23h = (
+        int(precip_sum_00_23h_x > 0)
+        if pd.notna(precip_sum_00_23h_x)
+        else np.nan
+    )
+
+    temp_dewpoint_spread_23h = (
+        temp_23h_x - td_23h_x
+        if pd.notna(temp_23h_x) and pd.notna(td_23h_x)
+        else np.nan
+    )
+    temp_dewpoint_spread_mean_00_23h = (
+        _stat_from_rows(
+            day_rows.assign(Spread=day_rows["Temp_C"] - day_rows["Td"]),
+            "Spread",
+            "mean",
+        )
+        if not day_rows.empty and {"Temp_C", "Td"}.issubset(day_rows.columns)
+        else np.nan
+    )
+    vapor_pressure_23h = _vapor_pressure_hpa(td_23h_x)
+
     # ---------------- NUEVAS FEATURES NO-FORECAST: GHCND ----------------
 
     clim_tmax_x = _climatology_stats(
@@ -1259,6 +1637,9 @@ def get_weather_features(
     )
 
     climatology_tmax_doy = clim_tmax_x["mean"]
+    climatology_tmax_std_doy = clim_tmax_x["std"]
+    climatology_tmax_p10_doy = clim_tmax_x["p10"]
+    climatology_tmax_p90_doy = clim_tmax_x["p90"]
 
     tmax_anomaly_x = (
         tmax_so_far_23h_x - climatology_tmax_doy
@@ -1278,18 +1659,98 @@ def get_weather_features(
         else np.nan
     )
 
+    clim_tmax_plus1 = _climatology_stats(
+        series=ncei_daily["TMAX"],
+        target_ts=next_ts,
+        available_until_ts=target_ts,
+        window_days=climatology_window_days,
+        min_records=min_climatology_records,
+    )
+    clim_tmin_plus1 = _climatology_stats(
+        series=ncei_daily["TMIN"],
+        target_ts=next_ts,
+        available_until_ts=target_ts,
+        window_days=climatology_window_days,
+        min_records=min_climatology_records,
+    )
+    clim_tmean_plus1 = _climatology_stats(
+        series=ncei_daily["TMEAN"],
+        target_ts=next_ts,
+        available_until_ts=target_ts,
+        window_days=climatology_window_days,
+        min_records=min_climatology_records,
+    )
+
+    climatology_tmax_doy_plus1 = clim_tmax_plus1["mean"]
+    climatology_tmax_std_doy_plus1 = clim_tmax_plus1["std"]
+    climatology_tmax_p10_doy_plus1 = clim_tmax_plus1["p10"]
+    climatology_tmax_p90_doy_plus1 = clim_tmax_plus1["p90"]
+    climatology_tmin_doy_plus1 = clim_tmin_plus1["mean"]
+    climatology_tmean_doy_plus1 = clim_tmean_plus1["mean"]
+    climatology_tmax_delta_doy_plus1_minus_x = (
+        climatology_tmax_doy_plus1 - climatology_tmax_doy
+        if pd.notna(climatology_tmax_doy_plus1)
+        and pd.notna(climatology_tmax_doy)
+        else np.nan
+    )
+    tmax_anomaly_vs_doy_plus1 = (
+        tmax_so_far_23h_x - climatology_tmax_doy_plus1
+        if pd.notna(tmax_so_far_23h_x)
+        and pd.notna(climatology_tmax_doy_plus1)
+        else np.nan
+    )
+
+    tmax_lag1 = tmax_x_minus_1
     tmax_lag2 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMAX")
     tmax_lag3 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=3), "TMAX")
     tmax_lag7 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=7), "TMAX")
 
     tmin_lag1 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "TMIN")
+    tmin_lag2 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMIN")
+    tmin_lag3 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=3), "TMIN")
+    tmin_lag7 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=7), "TMIN")
 
-    tmean_last_7 = [
-        _df_value(ncei_daily, target_ts - pd.Timedelta(days=i), "TMEAN")
-        for i in range(7, 0, -1)
-    ]
+    tmean_lag1 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "TMEAN")
+    tmean_lag2 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMEAN")
+    tmean_lag3 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=3), "TMEAN")
+    dtr_lag1 = _df_value(ncei_daily, target_ts - pd.Timedelta(days=1), "DTR")
 
+    tmax_last_3 = _completed_daily_values(ncei_daily, target_ts, "TMAX", days=3)
+    tmax_last_7 = _completed_daily_values(ncei_daily, target_ts, "TMAX", days=7)
+    tmax_last_14 = _completed_daily_values(ncei_daily, target_ts, "TMAX", days=14)
+    tmin_last_3 = _completed_daily_values(ncei_daily, target_ts, "TMIN", days=3)
+    tmin_last_7 = _completed_daily_values(ncei_daily, target_ts, "TMIN", days=7)
+    tmean_last_3 = _completed_daily_values(ncei_daily, target_ts, "TMEAN", days=3)
+    tmean_last_7 = _completed_daily_values(ncei_daily, target_ts, "TMEAN", days=7)
+    tmean_last_14 = _completed_daily_values(ncei_daily, target_ts, "TMEAN", days=14)
+    dtr_last_7 = _completed_daily_values(ncei_daily, target_ts, "DTR", days=7)
+
+    tmax_ma3_completed = _mean_if_enough(tmax_last_3, min_count=3)
+    tmax_ma7_completed = _mean_if_enough(tmax_last_7, min_count=7)
+    tmax_ma14_completed = _mean_if_enough(tmax_last_14, min_count=14)
+    tmax_std7_completed = _stat_if_enough(tmax_last_7, min_count=7, stat="std")
+    tmax_min7_completed = _stat_if_enough(tmax_last_7, min_count=7, stat="min")
+    tmax_max7_completed = _stat_if_enough(tmax_last_7, min_count=7, stat="max")
+    tmin_ma3_completed = _mean_if_enough(tmin_last_3, min_count=3)
+    tmin_ma7_completed = _mean_if_enough(tmin_last_7, min_count=7)
+    tmean_ma3_completed = _mean_if_enough(tmean_last_3, min_count=3)
     tmean_ma7 = _mean_if_enough(tmean_last_7, min_count=7)
+    tmean_ma14_completed = _mean_if_enough(tmean_last_14, min_count=14)
+    tmean_std7_completed = _stat_if_enough(tmean_last_7, min_count=7, stat="std")
+    dtr_ma7_completed = _mean_if_enough(dtr_last_7, min_count=7)
+
+    tmax_change_1d_completed = (
+        tmax_lag1 - tmax_lag2
+        if pd.notna(tmax_lag1) and pd.notna(tmax_lag2)
+        else np.nan
+    )
+    tmax_change_3d_completed = (
+        tmax_lag1 - tmax_lag3
+        if pd.notna(tmax_lag1) and pd.notna(tmax_lag3)
+        else np.nan
+    )
+    tmax_recent_warming_streak = _recent_directional_streak(tmax_last_7, "up")
+    tmax_recent_cooling_streak = _recent_directional_streak(tmax_last_7, "down")
 
     tmax_trend_3d = _linear_slope([
         _df_value(ncei_daily, target_ts - pd.Timedelta(days=2), "TMAX"),
@@ -1328,6 +1789,28 @@ def get_weather_features(
     ].to_numpy(dtype=float)
 
     pressure_trend_3d = _linear_slope(slp_values_3d)
+
+    temp_23h_values_3d = daily_23h.loc[
+        target_ts - pd.Timedelta(days=2): target_ts,
+        "Temp_23h",
+    ].to_numpy(dtype=float)
+
+    temp_23h_ma3 = _mean_if_enough(temp_23h_values_3d, min_count=3)
+    temp_23h_trend_3d = _linear_slope(temp_23h_values_3d)
+
+    hr_values_3d = daily_23h.loc[
+        target_ts - pd.Timedelta(days=2): target_ts,
+        "HR_23h",
+    ].to_numpy(dtype=float)
+
+    hr_23h_ma3 = _mean_if_enough(hr_values_3d, min_count=3)
+
+    wind_spd_values_3d = daily_23h.loc[
+        target_ts - pd.Timedelta(days=2): target_ts,
+        "WindSpd_23h",
+    ].to_numpy(dtype=float)
+
+    wind_spd_23h_ma3 = _mean_if_enough(wind_spd_values_3d, min_count=3)
 
     wind_u = (
         wind_spd_23h_x * np.sin(wind_rad)
@@ -1377,17 +1860,25 @@ def get_weather_features(
     # ---------------- ESTACIONALIDAD ----------------
 
     doy = target_ts.dayofyear
+    doy_plus1 = next_ts.dayofyear
     month = target_ts.month
     season = _season_from_month(month)
 
     doy_sin = np.sin(2 * np.pi * doy / 365.25)
     doy_cos = np.cos(2 * np.pi * doy / 365.25)
+    month_sin = np.sin(2 * np.pi * month / 12.0)
+    month_cos = np.cos(2 * np.pi * month / 12.0)
+
+    daylight_hours_x = _daylight_hours(CITY_COORDS[city_key]["lat"], doy)
+    daylight_hours_plus1 = _daylight_hours(CITY_COORDS[city_key]["lat"], doy_plus1)
+    daylight_delta_plus1_minus_x = daylight_hours_plus1 - daylight_hours_x
 
     features = {
         # Base as-of 23h
         "Tmax_so_far_23h_x": _safe(tmax_so_far_23h_x),
         "Tmin_so_far_23h_x": _safe(tmin_so_far_23h_x),
         "Tmean_so_far_23h_x": _safe(tmean_so_far_23h_x),
+        "Temp_23h_x": _safe(temp_23h_x),
         "Delta_Tmax_so_far_1d_23h": _safe(delta_tmax_so_far_1d_23h),
         "MA_Tmax_3d_asof_23h": _safe(ma_tmax_3d_asof_23h),
         "DTR_so_far_23h_x": _safe(dtr_so_far_23h_x),
@@ -1402,26 +1893,124 @@ def get_weather_features(
         "Cloud_23h_x": _safe(cloud_23h_x),
         "Precip_sum_00_23h_x": _safe(precip_sum_00_23h_x),
 
-        # Nuevas features no-forecast
+        # Sprint 3-v0: dinámica intradía as-of 23h
+        "Temp_06h_x": _safe(temp_06h_x),
+        "Temp_12h_x": _safe(temp_12h_x),
+        "Temp_18h_x": _safe(temp_18h_x),
+        "Temp_21h_x": _safe(temp_21h_x),
+        "Temp_change_23h_minus_18h": _safe(temp_change_23h_minus_18h),
+        "Temp_change_23h_minus_12h": _safe(temp_change_23h_minus_12h),
+        "Temp_change_23h_minus_06h": _safe(temp_change_23h_minus_06h),
+        "Temp_change_23h_1d": _safe(temp_change_23h_1d),
+        "Temp_std_00_23h_x": _safe(temp_std_00_23h_x),
+        "Temp_range_00_23h_x": _safe(temp_range_00_23h_x),
+        "Temp_mean_last_6h": _safe(temp_mean_last_6h),
+        "Temp_min_last_6h": _safe(temp_min_last_6h),
+        "Temp_max_last_6h": _safe(temp_max_last_6h),
+        "Temp_change_last_3h": _safe(temp_change_last_3h),
+        "Temp_change_last_6h": _safe(temp_change_last_6h),
+        "Temp_change_last_12h": _safe(temp_change_last_12h),
+        "Temp_slope_last_6h": _safe(temp_slope_last_6h),
+        "Temp_slope_last_12h": _safe(temp_slope_last_12h),
+        "Td_mean_00_23h_x": _safe(td_mean_00_23h_x),
+        "Td_min_00_23h_x": _safe(td_min_00_23h_x),
+        "Td_max_00_23h_x": _safe(td_max_00_23h_x),
+        "Td_mean_last_6h": _safe(td_mean_last_6h),
+        "Td_change_last_6h": _safe(td_change_last_6h),
+        "HR_mean_00_23h_x": _safe(hr_mean_00_23h_x),
+        "HR_min_00_23h_x": _safe(hr_min_00_23h_x),
+        "HR_max_00_23h_x": _safe(hr_max_00_23h_x),
+        "HR_mean_last_6h": _safe(hr_mean_last_6h),
+        "HR_change_last_6h": _safe(hr_change_last_6h),
+        "SLP_mean_00_23h_x": _safe(slp_mean_00_23h_x),
+        "SLP_min_00_23h_x": _safe(slp_min_00_23h_x),
+        "SLP_max_00_23h_x": _safe(slp_max_00_23h_x),
+        "SLP_change_last_3h": _safe(slp_change_last_3h),
+        "SLP_change_last_6h": _safe(slp_change_last_6h),
+        "SLP_change_last_12h": _safe(slp_change_last_12h),
+        "WindSpd_mean_00_23h_x": _safe(wind_spd_mean_00_23h_x),
+        "WindSpd_max_00_23h_x": _safe(wind_spd_max_00_23h_x),
+        "WindSpd_mean_last_6h": _safe(wind_spd_mean_last_6h),
+        "WindSpd_change_last_6h": _safe(wind_spd_change_last_6h),
+        "Cloud_mean_00_23h_x": _safe(cloud_mean_00_23h_x),
+        "Cloud_max_00_23h_x": _safe(cloud_max_00_23h_x),
+        "Cloud_mean_last_6h": _safe(cloud_mean_last_6h),
+        "Cloud_change_last_6h": _safe(cloud_change_last_6h),
+        "Precip_sum_last_6h": _safe(precip_sum_last_6h),
+        "Precip_sum_last_12h": _safe(precip_sum_last_12h),
+        "Precip_positive_hours_00_23h": _safe(precip_positive_hours_00_23h),
+        "Precip_positive_hours_last_6h": _safe(precip_positive_hours_last_6h),
+        "Precip_flag_00_23h": _safe(precip_flag_00_23h),
+        "Temp_dewpoint_spread_23h": _safe(temp_dewpoint_spread_23h),
+        "Temp_dewpoint_spread_mean_00_23h": _safe(temp_dewpoint_spread_mean_00_23h),
+        "Vapor_pressure_23h": _safe(vapor_pressure_23h),
+
+        # Nuevas features no-forecast previas + Sprint 3-v0 GHCND
         "climatology_tmax_doy": _safe(climatology_tmax_doy),
+        "climatology_tmax_std_doy": _safe(climatology_tmax_std_doy),
+        "climatology_tmax_p10_doy": _safe(climatology_tmax_p10_doy),
+        "climatology_tmax_p90_doy": _safe(climatology_tmax_p90_doy),
+        "climatology_tmax_doy_plus1": _safe(climatology_tmax_doy_plus1),
+        "climatology_tmax_std_doy_plus1": _safe(climatology_tmax_std_doy_plus1),
+        "climatology_tmax_p10_doy_plus1": _safe(climatology_tmax_p10_doy_plus1),
+        "climatology_tmax_p90_doy_plus1": _safe(climatology_tmax_p90_doy_plus1),
+        "climatology_tmin_doy_plus1": _safe(climatology_tmin_doy_plus1),
+        "climatology_tmean_doy_plus1": _safe(climatology_tmean_doy_plus1),
+        "climatology_tmax_delta_doy_plus1_minus_x": _safe(
+            climatology_tmax_delta_doy_plus1_minus_x
+        ),
         "tmax_anomaly_x": _safe(tmax_anomaly_x),
+        "tmax_anomaly_vs_doy_plus1": _safe(tmax_anomaly_vs_doy_plus1),
+        "tmax_lag1": _safe(tmax_lag1),
         "tmax_lag2": _safe(tmax_lag2),
         "tmax_lag3": _safe(tmax_lag3),
         "tmax_lag7": _safe(tmax_lag7),
         "tmin_lag1": _safe(tmin_lag1),
+        "tmin_lag2": _safe(tmin_lag2),
+        "tmin_lag3": _safe(tmin_lag3),
+        "tmin_lag7": _safe(tmin_lag7),
+        "tmean_lag1": _safe(tmean_lag1),
+        "tmean_lag2": _safe(tmean_lag2),
+        "tmean_lag3": _safe(tmean_lag3),
+        "dtr_lag1": _safe(dtr_lag1),
+        "tmax_ma3_completed": _safe(tmax_ma3_completed),
+        "tmax_ma7_completed": _safe(tmax_ma7_completed),
+        "tmax_ma14_completed": _safe(tmax_ma14_completed),
+        "tmax_std7_completed": _safe(tmax_std7_completed),
+        "tmax_min7_completed": _safe(tmax_min7_completed),
+        "tmax_max7_completed": _safe(tmax_max7_completed),
+        "tmin_ma3_completed": _safe(tmin_ma3_completed),
+        "tmin_ma7_completed": _safe(tmin_ma7_completed),
+        "tmean_ma3_completed": _safe(tmean_ma3_completed),
         "tmean_ma7": _safe(tmean_ma7),
+        "tmean_ma14_completed": _safe(tmean_ma14_completed),
+        "tmean_std7_completed": _safe(tmean_std7_completed),
+        "dtr_ma7_completed": _safe(dtr_ma7_completed),
+        "tmax_change_1d_completed": _safe(tmax_change_1d_completed),
+        "tmax_change_3d_completed": _safe(tmax_change_3d_completed),
+        "tmax_recent_warming_streak": _safe(tmax_recent_warming_streak),
+        "tmax_recent_cooling_streak": _safe(tmax_recent_cooling_streak),
         "tmax_trend_3d": _safe(tmax_trend_3d),
         "tmax_trend_7d": _safe(tmax_trend_7d),
         "dtr_ma3": _safe(dtr_ma3),
         "td_anomaly_x": _safe(td_anomaly_x),
         "td_ma3": _safe(td_ma3),
+        "Temp_23h_ma3": _safe(temp_23h_ma3),
+        "Temp_23h_trend_3d": _safe(temp_23h_trend_3d),
+        "HR_23h_ma3": _safe(hr_23h_ma3),
+        "WindSpd_23h_ma3": _safe(wind_spd_23h_ma3),
         "wind_u": _safe(wind_u),
         "wind_v": _safe(wind_v),
         "pressure_trend_3d": _safe(pressure_trend_3d),
         "month": _safe(month),
+        "month_sin": _safe(month_sin),
+        "month_cos": _safe(month_cos),
         "season": season,
         "extreme_heat_flag": _safe(extreme_heat_flag),
         "extreme_cold_flag": _safe(extreme_cold_flag),
+        "daylight_hours_x": _safe(daylight_hours_x),
+        "daylight_hours_plus1": _safe(daylight_hours_plus1),
+        "daylight_delta_plus1_minus_x": _safe(daylight_delta_plus1_minus_x),
 
         # Metadata / estacionalidad
         "ciudad": city,
@@ -1445,8 +2034,37 @@ def get_weather_features(
 
         # td_anomaly_x puede faltar al inicio del histórico si todavía no hay
         # suficientes registros para construir climatología de Td_23h.
+        # Las señales intradía granulares de Sprint 3-v0 también pueden faltar
+        # de forma puntual por huecos horarios de ISD-Lite; el contrato exige
+        # que la key exista y deja que el pipeline impute esos faltantes.
         allowed_missing = {
             "td_anomaly_x",
+            "Temp_06h_x",
+            "Temp_12h_x",
+            "Temp_18h_x",
+            "Temp_21h_x",
+            "Temp_change_23h_minus_18h",
+            "Temp_change_23h_minus_12h",
+            "Temp_change_23h_minus_06h",
+            "Temp_change_23h_1d",
+            "Temp_change_last_3h",
+            "Temp_change_last_6h",
+            "Temp_change_last_12h",
+            "Temp_slope_last_6h",
+            "Temp_slope_last_12h",
+            "Td_change_last_6h",
+            "HR_change_last_6h",
+            "SLP_change_last_3h",
+            "SLP_change_last_6h",
+            "SLP_change_last_12h",
+            "WindSpd_change_last_6h",
+            "Cloud_change_last_6h",
+            "Precip_positive_hours_00_23h",
+            "Precip_positive_hours_last_6h",
+            "Temp_23h_ma3",
+            "Temp_23h_trend_3d",
+            "HR_23h_ma3",
+            "WindSpd_23h_ma3",
         }
 
         missing_features = [

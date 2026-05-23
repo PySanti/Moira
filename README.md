@@ -2577,6 +2577,8 @@ def get_weather_features(
 
 </details>
 
+
+
 <details>
 <summary><strong>Adicion de nuevas features</strong></summary>
 
@@ -5166,6 +5168,416 @@ Resultados de test
 
 </details>
 
+# Conclusiones sobre V0-SPRINT 2
+
+<details open>
+<summary><strong>Resumen ejecutivo</strong></summary>
+
+SPRINT 2 corrige el principal problema conceptual de SPRINT 1: el dataset ya no mezcla fuentes meteorológicas de distintas estaciones para las variables centrales. La generación de features queda centrada en **LaGuardia, New York**, usando:
+
+- **NCEI/GHCND Daily Summaries - LaGuardia `USW00014732`** para `TMAX`, `TMIN`, lags, climatología y target oficial `t_max_x+1`.
+- **NCEI ISD-Lite / Global Hourly - LaGuardia `725030-14732`** para features disponibles hasta las 23h del día X.
+- Cálculos internos para estacionalidad, anomalías, tendencias, flags extremos y componentes de viento.
+
+El entrenamiento de `V0-SPRINT 2 / train_1.1` muestra una mejora clara sobre baselines simples, pero también evidencia un techo importante: con observaciones locales hasta las 23h del día X, el modelo todavía no ve con suficiente detalle la dinámica atmosférica que determina la máxima del día X+1, especialmente en primavera.
+
+</details>
+
+<details open>
+<summary><strong>Dataset utilizado</strong></summary>
+
+Archivo usado:
+
+```text
+./dataset/sprint2.csv
+```
+
+Metadata relevante del entrenamiento:
+
+| Elemento | Valor |
+| -------- | ----- |
+| Rango total del dataset | `1983-01-01` a `2025-08-22` |
+| Filas totales usadas por el entrenamiento | `14210` |
+| Target | `t_max_x+1` |
+| Unidad del target | °C |
+| Train/validation temporal | años `< 2021` |
+| Test temporal | años `>= 2021` |
+| Filas train/validation | `12899` |
+| Filas test | `1311` |
+| Año inicial train/validation | `1983` |
+| Año final train/validation | `2020` |
+| Año inicial test | `2021` |
+| Año final test | `2025` |
+
+La validación no usa split aleatorio. Se implementa una validación temporal tipo **expanding-window backtest**:
+
+```text
+train: 1983              -> validation: 1984
+train: 1983-1984         -> validation: 1985
+train: 1983-1985         -> validation: 1986
+...
+train: 1983-2019         -> validation: 2020
+test final: 2021-2025
+```
+
+Esto evita que registros futuros contaminen métricas pasadas.
+
+</details>
+
+<details open>
+<summary><strong>Código de entrenamiento</strong></summary>
+
+Archivo:
+
+```text
+./training/v0-sprint2/train_1.1/main.py
+```
+
+El módulo entrena un modelo tabular usando `scikit-learn`:
+
+```python
+MODEL_PARAMS = {
+    "loss": "absolute_error",
+    "learning_rate": 0.025,
+    "max_iter": 1200,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 25,
+    "l2_regularization": 0.03,
+    "early_stopping": False,
+    "random_state": 42,
+}
+```
+
+Algoritmo:
+
+```text
+HistGradientBoostingRegressor
+```
+
+Motivo de selección:
+
+- Es adecuado para datos tabulares.
+- Captura interacciones no lineales entre temperatura, humedad, presión, viento y estacionalidad.
+- Usa `loss="absolute_error"`, alineando el entrenamiento con la métrica principal: `MAE`.
+- Es más robusto que un modelo lineal simple para relaciones meteorológicas no lineales.
+
+Controles anti-leakage implementados:
+
+- `date`, `date_str` y `t_max_x+1` se excluyen de las features.
+- Cada fold de validación entrena solo con años anteriores.
+- La imputación y el one-hot encoding se ajustan dentro del train de cada fold.
+- El test final usa únicamente años `>= 2021`.
+- Los hiperparámetros se fijan antes del backtesting, evitando tunear contra los años de validación.
+
+Artefactos generados:
+
+| Archivo | Descripción |
+| ------- | ----------- |
+| `best_model.joblib` | Modelo final entrenado con todos los datos pre-test. |
+| `report.json` | Métricas globales, por año, por temporada, baselines y rutas de artefactos. |
+| `validation_predictions.csv` | Predicciones de validación walk-forward. |
+| `test_predictions.csv` | Predicciones del test temporal final. |
+| `plots/*.png` | Gráficos de interpretación del entrenamiento. |
+
+</details>
+
+<details open>
+<summary><strong>Resultados del entrenamiento</strong></summary>
+
+Métricas globales:
+
+| Split | N | MAE (°C) | RMSE (°C) | Median AE (°C) | P90 AE (°C) | Bias (°C) | R² |
+| ----- | -: | -------: | --------: | -------------: | ----------: | --------: | -: |
+| Validación walk-forward | `12542` | `2.3463` | `3.0073` | `1.9272` | `4.8642` | `-0.1422` | `0.9110` |
+| Test 2021+ | `1311` | `2.2369` | `2.9027` | `1.8177` | `4.8157` | `-0.2775` | `0.9010` |
+
+MAE en test por año:
+
+| Año | N | MAE (°C) |
+| ---: | -: | -------: |
+| `2021` | `279` | `2.2748` |
+| `2022` | `286` | `2.1120` |
+| `2023` | `289` | `2.1061` |
+| `2024` | `274` | `2.1500` |
+| `2025` | `183` | `2.7110` |
+
+MAE por temporada:
+
+| Temporada | Validación MAE (°C) | Test MAE (°C) | Lectura |
+| --------- | ------------------: | ------------: | ------- |
+| `winter` | `2.2874` | `2.2972` | Error medio estable, pero sensible a irrupciones frías/cálidas. |
+| `spring` | `2.9304` | `2.9398` | Peor temporada; mayor volatilidad y cambios frontales bruscos. |
+| `summer` | `2.1033` | `1.8945` | Mejor desempeño relativo; régimen térmico más estable. |
+| `autumn` | `2.0487` | `1.7584` | Buen desempeño relativo. |
+
+Comparación contra baselines simples en test:
+
+| Baseline | MAE (°C) | Lectura |
+| -------- | -------: | ------- |
+| `Tmax_so_far_23h_x` | `3.2084` | El modelo mejora ~`0.97 °C` contra usar solo la máxima observada del día X. |
+| `MA_Tmax_3d_asof_23h` | `3.5599` | La media móvil simple queda bastante por detrás. |
+| `climatology_tmax_doy` | `3.3950` | La climatología sirve como referencia, pero no captura eventos sinópticos. |
+| `tmean_ma7` | `4.8944` | Baseline débil para el target de máxima diaria siguiente. |
+
+</details>
+
+<details open>
+<summary><strong>Gráficos generados</strong></summary>
+
+### MAE de validación por año
+
+![MAE de validación por año](./training/v0-sprint2/train_1.1/plots/validation_mae_by_year.png)
+
+Lectura:
+
+- Los primeros años tienen mayor error porque el entrenamiento dispone de menos historial.
+- Entre 2000 y 2020 el MAE se estabiliza alrededor de `2.1-2.4 °C`.
+- No se observa una caída fuerte al agregar más años, lo que sugiere que la limitación principal no es cantidad de datos históricos sino información predictiva faltante.
+
+### MAE por temporada
+
+![MAE por temporada](./training/v0-sprint2/train_1.1/plots/mae_by_season.png)
+
+Lectura:
+
+- Primavera es la estación más difícil, con MAE cercano a `2.94 °C` tanto en validación como en test.
+- Verano y otoño tienen mejor desempeño, probablemente por regímenes térmicos más persistentes.
+- Esta gráfica sugiere que los mayores errores vienen de cambios bruscos de masa de aire, no de estacionalidad básica.
+
+### Test: real vs predicción
+
+![Test real vs predicción](./training/v0-sprint2/train_1.1/plots/test_actual_vs_predicted.png)
+
+Lectura:
+
+- El modelo captura la relación general entre temperatura real y predicha.
+- Hay dispersión relevante alrededor de la diagonal.
+- En extremos y cambios bruscos, el modelo tiende a suavizar la predicción hacia valores más medios.
+
+### Test: serie temporal real vs predicha
+
+![Test serie temporal real vs predicha](./training/v0-sprint2/train_1.1/plots/test_timeseries_actual_vs_predicted.png)
+
+Lectura:
+
+- El modelo sigue bien la estacionalidad anual.
+- Los errores más visibles aparecen en picos o caídas rápidas.
+- Esto refuerza la hipótesis de que faltan variables de forecast o información regional/upstream.
+
+### Distribución de errores
+
+![Distribución de errores](./training/v0-sprint2/train_1.1/plots/error_distribution.png)
+
+Lectura:
+
+- La distribución está centrada cerca de cero, pero con colas largas.
+- El MAE global queda penalizado por eventos extremos o transiciones rápidas.
+- En test, el bias es `-0.2775 °C`, indicando una ligera tendencia a subestimar la Tmax de X+1.
+
+</details>
+
+<details open>
+<summary><strong>Conclusiones técnicas</strong></summary>
+
+1. **SPRINT 2 mejora la integridad del dataset**, especialmente al unificar fuentes alrededor de LaGuardia y respetar el corte as-of 23h.
+
+2. **Agregar más features no produjo una mejora proporcional**, porque muchas features nuevas son transformaciones de la misma información térmica, estacional o local.
+
+3. **El cuello de botella no parece ser el algoritmo**, sino la falta de información atmosférica predictiva sobre el día X+1.
+
+4. **Primavera concentra el mayor error**, lo cual es consistente con cambios frontales y transiciones rápidas de masa de aire en New York.
+
+5. **El objetivo de `0.2 °C MAE` no parece factible con este set de features no-forecast**. El resultado actual está en `2.2369 °C` de MAE en test, y los errores de cola superan `4.8 °C` en el percentil 90.
+
+6. **Para una mejora sustancial, el siguiente sprint debería incorporar forecasting externo**, por ejemplo:
+
+| Feature propuesta | Fuente | Motivo |
+| ----------------- | ------ | ------ |
+| `forecast_tmax_x+1` | NBM / HRRR / GFS / NWS / Open-Meteo forecast archive | Probablemente la feature más potente. |
+| `forecast_anomaly_x+1` | Forecast externo + climatología LaGuardia | Captura qué tan extremo se espera el día siguiente. |
+| `forecast_error_tmax_lag1` | Forecast histórico + observado GHCND | Corrige sesgo reciente del forecast externo. |
+| `forecast_error_tmax_ma3` | Forecast histórico + observado GHCND | Detecta si el forecast viene subestimando/sobrestimando. |
+| Variables regionales/upstream | JFK, Newark, Central Park, estaciones al oeste/noroeste | Ayudan a detectar advección y cambios de masa de aire. |
+
+</details>
+
+# Sprint 3-v0
+
+<details open>
+<summary><strong>Objetivo del sprint</strong></summary>
+
+SPRINT 3-v0 parte de la conclusion de SPRINT 2: el modelo ya esta construido con fuentes consistentes de LaGuardia y respeta el corte **as-of 23h del dia X**, pero todavia le falta informacion sobre la dinamica atmosferica que conecta el cierre del dia X con la maxima de X+1.
+
+El foco de este sprint es enriquecer `./utils/build_climate_data.py` sin cambiar la definicion del target:
+
+- Mantener todas las features de SPRINT 2.
+- Agregar senales intradia disponibles antes o exactamente a las 23h de X.
+- Agregar memoria termica de dias completos ya cerrados, siempre hasta X-1.
+- Agregar climatologia del dia siguiente calculada solo con registros historicos anteriores a X.
+- Evitar forecast externo por ahora, salvo que exista una fuente de snapshots historicos emitidos antes de las 23h de X.
+
+No se incorporaron forecasts externos en esta iteracion. Un forecast real puede ser muy potente, pero para entrenamiento historico debe venir de un archivo de pronosticos emitidos antes del cierre de X. Usar reanalysis, observaciones de X+1 o forecasts regenerados hoy para fechas pasadas introduciria leakage.
+
+</details>
+
+<details open>
+<summary><strong>Features agregadas</strong></summary>
+
+La nueva version conserva el esquema anterior y agrega **95 features**. En `train_mode` el output pasa a tener `133` keys incluyendo `t_max_x+1`; en `inference_mode` devuelve `132` keys y excluye el target.
+
+| Grupo | Features agregadas | Fuente / calculo | Motivo esperado |
+| ----- | ------------------ | ---------------- | --------------- |
+| Temperatura puntual intradia | `Temp_23h_x`, `Temp_06h_x`, `Temp_12h_x`, `Temp_18h_x`, `Temp_21h_x` | ISD-Lite LaGuardia, observacion disponible a cada hora o la anterior dentro de tolerancia; nunca usa observaciones futuras. | Describe la trayectoria termica del dia X, no solo el maximo/minimo. Ayuda a distinguir dias que cierran enfriando fuerte de dias que mantienen masa calida. |
+| Cambios termicos intradia | `Temp_change_23h_minus_18h`, `Temp_change_23h_minus_12h`, `Temp_change_23h_minus_06h`, `Temp_change_23h_1d` | Diferencias entre temperatura de 23h y puntos previos del dia X o 23h de X-1. | Captura enfriamiento nocturno, persistencia y cambio de masa de aire. |
+| Estadistica termica del dia X | `Temp_std_00_23h_x`, `Temp_range_00_23h_x`, `Temp_mean_last_6h`, `Temp_min_last_6h`, `Temp_max_last_6h` | Agregados de `Temp_C` en ISD-Lite hasta 23h. | Resume volatilidad intradia y estado termico reciente antes del corte. |
+| Tendencia termica reciente | `Temp_change_last_3h`, `Temp_change_last_6h`, `Temp_change_last_12h`, `Temp_slope_last_6h`, `Temp_slope_last_12h` | Cambios y pendientes lineales de observaciones horarias hasta 23h. | Da una senal directa de si la temperatura viene cayendo, subiendo o estabilizandose al cierre. |
+| Punto de rocio intradia | `Td_mean_00_23h_x`, `Td_min_00_23h_x`, `Td_max_00_23h_x`, `Td_mean_last_6h`, `Td_change_last_6h` | ISD-Lite LaGuardia, usando `dew_point_temperature / 10`. | El punto de rocio aproxima contenido de humedad y masa de aire; suele anticipar noches calidas/frias y cambios frontales. |
+| Humedad relativa intradia | `HR_mean_00_23h_x`, `HR_min_00_23h_x`, `HR_max_00_23h_x`, `HR_mean_last_6h`, `HR_change_last_6h` | Humedad calculada con formula Magnus desde temperatura y punto de rocio. | Complementa Td; ayuda a separar calor seco, aire maritimo humedo y enfriamiento radiativo. |
+| Presion intradia | `SLP_mean_00_23h_x`, `SLP_min_00_23h_x`, `SLP_max_00_23h_x`, `SLP_change_last_3h`, `SLP_change_last_6h`, `SLP_change_last_12h` | ISD-Lite LaGuardia hasta 23h. | Cambios de presion son proxies de frentes, adveccion y transiciones sinopticas. |
+| Viento intradia | `WindSpd_mean_00_23h_x`, `WindSpd_max_00_23h_x`, `WindSpd_mean_last_6h`, `WindSpd_change_last_6h` | ISD-Lite LaGuardia hasta 23h. | Viento fuerte o cambiante puede indicar mezcla, adveccion o paso frontal. |
+| Nubosidad intradia | `Cloud_mean_00_23h_x`, `Cloud_max_00_23h_x`, `Cloud_mean_last_6h`, `Cloud_change_last_6h` | `sky_condition` de ISD-Lite convertido a porcentaje aproximado. | La nubosidad modula enfriamiento nocturno y calentamiento del dia siguiente. |
+| Precipitacion reciente | `Precip_sum_last_6h`, `Precip_sum_last_12h`, `Precip_positive_hours_00_23h`, `Precip_positive_hours_last_6h`, `Precip_flag_00_23h` | `Precip_1h` de ISD-Lite; fallback local ya existente para acumulado diario. | Lluvia reciente sugiere nubosidad, humedad alta, evaporacion y cambios frontales. |
+| Humedad fisica derivada | `Temp_dewpoint_spread_23h`, `Temp_dewpoint_spread_mean_00_23h`, `Vapor_pressure_23h` | Diferencia `Temp_C - Td` y presion de vapor aproximada desde Td. | Resume saturacion del aire y potencial de enfriamiento nocturno. |
+| Climatologia del dia X ampliada | `climatology_tmax_std_doy`, `climatology_tmax_p10_doy`, `climatology_tmax_p90_doy` | GHCND LaGuardia, solo fechas anteriores a X. | Da al modelo escala de normalidad y extremos para el dia actual. |
+| Climatologia del dia siguiente | `climatology_tmax_doy_plus1`, `climatology_tmax_std_doy_plus1`, `climatology_tmax_p10_doy_plus1`, `climatology_tmax_p90_doy_plus1`, `climatology_tmin_doy_plus1`, `climatology_tmean_doy_plus1` | GHCND LaGuardia para el dia del anio de X+1, filtrando `index < X`. | Es un prior fuerte para la Tmax de X+1 sin mirar el target real. |
+| Delta climatologico hacia X+1 | `climatology_tmax_delta_doy_plus1_minus_x`, `tmax_anomaly_vs_doy_plus1` | Diferencia entre climatologia de X+1 y X, y anomalia de `Tmax_so_far_23h_x` contra la climatologia de X+1. | Ayuda durante transiciones estacionales, donde la normal climatologica cambia dia a dia. |
+| Lags diarios completados | `tmax_lag1`, `tmin_lag2`, `tmin_lag3`, `tmin_lag7`, `tmean_lag1`, `tmean_lag2`, `tmean_lag3`, `dtr_lag1` | GHCND LaGuardia, solo dias completos hasta X-1. | Refuerza persistencia termica y amplitud diaria reciente. |
+| Rolling windows diarios | `tmax_ma3_completed`, `tmax_ma7_completed`, `tmax_ma14_completed`, `tmax_std7_completed`, `tmax_min7_completed`, `tmax_max7_completed`, `tmin_ma3_completed`, `tmin_ma7_completed`, `tmean_ma3_completed`, `tmean_ma14_completed`, `tmean_std7_completed`, `dtr_ma7_completed` | Ventanas de dias completos, siempre terminando en X-1. | Captura regimen reciente y volatilidad, evitando mezclar la observacion parcial de X con dias oficiales completos. |
+| Cambios y rachas diarias | `tmax_change_1d_completed`, `tmax_change_3d_completed`, `tmax_recent_warming_streak`, `tmax_recent_cooling_streak` | GHCND LaGuardia hasta X-1. | Identifica calentamientos/enfriamientos persistentes que un promedio simple suaviza. |
+| Estado 23h multidia | `Temp_23h_ma3`, `Temp_23h_trend_3d`, `HR_23h_ma3`, `WindSpd_23h_ma3` | Tabla diaria 23h construida desde ISD-Lite para X-2, X-1, X. | Resume persistencia nocturna y condiciones de cierre en varios dias. |
+| Estacionalidad adicional | `month_sin`, `month_cos`, `daylight_hours_x`, `daylight_hours_plus1`, `daylight_delta_plus1_minus_x` | Calculo deterministico desde fecha y latitud de New York. | Daylength aporta una senal fisica suave de radiacion disponible, distinta de `doy_sin/cos`. |
+
+</details>
+
+<details open>
+<summary><strong>Cambios en build_climate_data.py</strong></summary>
+
+Archivo modificado:
+
+```text
+./utils/build_climate_data.py
+```
+
+Cambios principales:
+
+1. Se mantiene el contrato `train_mode` / `inference_mode`.
+   - `train_mode` devuelve todas las features y el target oficial `t_max_x+1`.
+   - `inference_mode` devuelve las mismas features disponibles al cierre de X, sin `t_max_x+1`.
+
+2. Se agrego `Temp_23h` a la tabla diaria 23h interna de ISD-Lite.
+   - `_build_23h_daily_from_hourly(...)` ahora devuelve `Temp_23h`, `HR_23h`, `Td_23h`, `SLP_23h`, `WindSpd_23h`, `WindDir_23h`, `Cloud_23h`.
+   - Se incremento la version del cache `ISD_DAILY_23H_CACHE_VERSION = 2` para no reutilizar pickles antiguos sin la nueva columna.
+
+3. Se agregaron helpers genericos para evitar duplicacion:
+   - `_stat_if_enough(...)`
+   - `_completed_daily_values(...)`
+   - `_rows_within_last_hours(...)`
+   - `_stat_from_rows(...)`
+   - `_change_from_rows(...)`
+   - `_slope_from_rows(...)`
+   - `_value_at_or_before(...)`
+   - `_precip_sum_from_rows(...)`
+   - `_positive_precip_hours(...)`
+   - `_vapor_pressure_hpa(...)`
+   - `_daylight_hours(...)`
+   - `_recent_directional_streak(...)`
+
+4. La climatologia ahora devuelve tambien `median`, `std` e `iqr`, ademas de `mean`, `p10`, `p90` y `n`.
+
+5. Todas las features nuevas respetan el corte temporal:
+   - ISD-Lite se filtra hasta `execution_dt = X 23:00`.
+   - Las lecturas por hora usan `_value_at_or_before(...)`, que solo mira hacia atras.
+   - Las ventanas intradia usan observaciones `<= 23h`.
+   - Los rolling windows diarios usan GHCND hasta X-1.
+   - La climatologia de X+1 usa `available_until_ts=target_ts`, por lo que filtra historico con `index < X`.
+
+6. `strict=True` sigue descartando filas sin features base necesarias, pero permite faltantes puntuales en senales intradia granulares por huecos horarios de ISD-Lite. Las keys existen siempre; el pipeline de entrenamiento puede imputar esos valores.
+
+</details>
+
+<details open>
+<summary><strong>Cambios en test.py</strong></summary>
+
+Archivo modificado:
+
+```text
+./utils/test.py
+```
+
+Cambios principales:
+
+- El modulo por defecto ahora es `utils.build_climate_data`, pero mantiene fallback para importar `build_climate_data` desde `utils`.
+- Se agregaron parametros del contrato nuevo:
+
+```text
+--mode
+--include-target
+--history-start
+--execution-hour
+--nearest-tolerance-hours
+--min-climatology-records
+--climatology-window-days
+--compute-td-anomaly
+--run-inference-leakage-check
+--inference-check-samples
+```
+
+- El tester ahora pasa kwargs dinamicamente segun la firma real de `get_weather_features`.
+- Se agrego una auditoria de leakage: ejecuta una muestra en `inference_mode` con `include_target=False` y falla si aparece `t_max_x+1`.
+- El resumen JSON registra los parametros efectivos usados para construir las features.
+
+Comando recomendado para Sprint 3-v0:
+
+```bash
+python3 utils/test.py \
+  --module utils.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1983-01-01 \
+  --end 2025-12-31 \
+  --n-samples 1000 \
+  --strict true \
+  --mode train_mode \
+  --nearest-tolerance-hours 6 \
+  --history-start 1980-01-01 \
+  --out-dir ./test-reports/sprint3-v0/feature_contract_test
+```
+
+</details>
+
+<details open>
+<summary><strong>Dependencias</strong></summary>
+
+SPRINT 3-v0 no introduce dependencias nuevas. Las features agregadas usan el stack ya presente en el proyecto:
+
+```text
+requests
+pandas
+numpy
+```
+
+Para entrenamiento se sigue necesitando `scikit-learn`, como en SPRINT 2. El intento de instalarlo en el entorno actual con `python3 -m pip install scikit-learn --user` fue bloqueado por la politica PEP 668 del sistema (`externally-managed-environment`). La forma recomendada es usar un virtualenv del proyecto o instalar desde el gestor del sistema.
+
+</details>
+
+<details>
+<summary><strong>Problemas identificados</strong></summary>
+
+Esta seccion resume riesgos detectados en la integracion entre `utils/build_climate_data.py` (feature builder), `utils/miner.py` (generacion de dataset) y `utils/test.py` (contrato y auditoria).
+
+| Riesgo | Modulos | Sintoma | Impacto | Prob. | Sev. | Mitigacion recomendada | Evidencia / Nota |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Defaults desalineados de `nearest_tolerance_hours` | build_climate_data + miner + test | Resultados no reproducibles si no se pasa el flag explicitamente | Cambia cobertura de features (especialmente as-of 23h) y tasa de filas vacias | Alta | Alta | Pasar siempre `--nearest-tolerance-hours` en `miner.py` y `test.py` y documentar un unico valor recomendado (actual: `6`) | `preload_weather_cache()` y `get_weather_features()` usan defaults distintos; ver tambien notas en `AGENTS.md` |
+| Retorno `{}` con `strict=True` induce sesgo de muestreo | build_climate_data + miner + test | `get_weather_features()` retorna `{}` cuando faltan inputs criticos (ej: `Cloud_23h_x`) | `miner.py` termina excluyendo fechas no aleatorias; el dataset queda sesgado hacia dias con mejor cobertura; `test.py` puede fallar por `empty_ratio` | Media | Alta | Persistir y analizar `failed_rows` como parte del pipeline; decidir politica (reintentos, tolerancias, o `strict` diferenciado train vs inference) | En auditoria se observaron fallos recurrentes por `Cloud_23h_x` y otros faltantes as-of 23h |
+| Doble fuente de verdad del contrato 133/132 | test + build_climate_data | `test.py` valida cantidad/keys esperadas pero el builder no expone un contrato unico reutilizable | Cambios de features pueden romper tests o, peor, pasar con drift silencioso si se ajusta solo el test | Media | Media | Mantener el contrato documentado y cambiarlo de forma coordinada (builder + test + miner); idealmente derivar expected keys desde el builder | Contrato actual: 133 en `train_mode` (incluye `t_max_x+1`) y 132 en inferencia |
+| Inconsistencia de formato de fecha (`date_str`) | build_climate_data + miner + test | El builder espera `%d-%m-%y`; ejecuciones directas con ISO fallan o generan fechas incorrectas | Errores de ejecucion o mineria con fechas desplazadas | Media | Media | Estandarizar input a ISO en CLI (`miner.py`/`test.py`) y convertir en un solo lugar; documentar formato aceptado para llamadas directas | Ver notas en `AGENTS.md`: `get_weather_features()` espera `%d-%m-%y` |
+| Ciudad soportada efectivamente solo `new york` | build_climate_data + miner + test | `CITY_COORDS` expone varias ciudades pero el builder hard-fail fuera de `new york` | Confusion operativa: `miner.py`/`test.py` aceptan `--city` pero el builder no soporta varias estaciones | Alta | Media | Documentar explicitamente la limitacion actual y/o validar antes en CLI para fallar con mensaje claro | `get_weather_features()` y `preload_weather_cache()` hard-fail fuera de `new york` (ver `AGENTS.md`) |
+| `miner.py` depende del modo de ejecucion para imports | miner + build_climate_data | Ejecutar `python utils/miner.py ...` puede fallar importando `utils.*` segun `PYTHONPATH`/cwd | Friccion para reproducir dataset, especialmente en entornos limpios | Media | Baja | Recomendar `python -m utils.miner ...` desde la raiz del repo | Observado en auditoria: fallo de import como script, ok como modulo |
+| Cache local afecta reproducibilidad y el git status | build_climate_data + miner + test | `.weather_cache/` puede cambiar entre corridas; accidentalmente se versionan borrados/cambios | Dificulta comparar resultados y contamina diffs/PRs | Media | Media | Mantener `.weather_cache/` ignorado y controlar ubicacion via `WEATHER_CACHE_DIR` o deshabilitar con `WEATHER_DISABLE_DISK_CACHE=1` | Ver notas en `AGENTS.md` sobre cache de disco |
+| Fallback de precipitacion puede sobrecontar (1h vs 6h) | build_climate_data + miner | Si se suman ventanas de 6h sin garantizar no solapamiento, `Precip_*` puede inflarse | Ruido sistematico en feature de precip; afecta entrenamiento | Baja | Media | Definir una unica estrategia (preferir 1h con umbral; si no, 6h sin sumar solapes) y cubrir con un test de consistencia | Riesgo identificado en la logica de precipitacion as-of 23h |
+
+</details>
+
 # Desarrollo de V1
 
 ![Versión 1 image](./images/v1.png)
@@ -5177,4 +5589,3 @@ Resultados de test
 # Desarrollo de V3
 
 ![Versión 3 image](./images/v3.png)
-
