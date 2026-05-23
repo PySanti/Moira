@@ -1,0 +1,77 @@
+{
+  "dataset": "data/processed/sprint3.csv",
+  "metadata": "data/processed/sprint3_metadata.json",
+  "failed_rows": "data/processed/sprint3_failed_rows.csv",
+  "rows": 16806,
+  "columns": 135,
+  "date_min": "1980-01-01",
+  "date_max": "2026-01-04",
+  "expected_days": 16943,
+  "observed_days": 16806,
+  "missing_days": 137,
+  "coverage_ratio": 0.9919140648055244,
+  "coverage_pct": 99.19140648055243,
+  "duplicates_by_date": 0,
+  "target_column": "t_max_x+1",
+  "target_null_rate": 0.0,
+  "overall_feature_missing_rate": 0.011198113097810575,
+  "top_missing_features": {
+    "Cloud_23h_x": 0.07592526478638581,
+    "td_anomaly_x": 0.05152921575627752,
+    "tmax_anomaly_vs_doy_plus1": 0.05129120552183744,
+    "extreme_heat_flag": 0.05129120552183744,
+    "tmax_anomaly_x": 0.05129120552183744,
+    "extreme_cold_flag": 0.05129120552183744,
+    "climatology_tmin_doy_plus1": 0.043555872902534806,
+    "climatology_tmax_p90_doy_plus1": 0.043555872902534806,
+    "climatology_tmax_doy": 0.043555872902534806,
+    "climatology_tmax_p10_doy_plus1": 0.043555872902534806,
+    "climatology_tmax_p90_doy": 0.043555872902534806,
+    "climatology_tmax_std_doy": 0.043555872902534806,
+    "climatology_tmax_p10_doy": 0.043555872902534806,
+    "climatology_tmax_doy_plus1": 0.043555872902534806,
+    "climatology_tmax_std_doy_plus1": 0.043555872902534806
+  },
+  "non_numeric_columns": [
+    "date",
+    "date_str",
+    "season",
+    "ciudad"
+  ],
+  "unexpected_non_numeric_columns": [],
+  "schema_hash_count": 1,
+  "schema_mismatch_count": 0,
+  "errors_total": 137,
+  "error_counts": {
+    "OTHER_ERROR": 137
+  },
+  "failed_by_year": {
+    "2026": 137
+  },
+  "failed_by_month": {
+    "2026-01": 27,
+    "2026-02": 28,
+    "2026-03": 31,
+    "2026-04": 30,
+    "2026-05": 21
+  },
+  "train_rows_year_lt_2021": 14976,
+  "holdout_rows_year_gte_2021": 1830,
+  "plausibility_violations": {
+    "HR_23h_x": 0,
+    "Cloud_23h_x": 0,
+    "WindSpd_23h_x": 0,
+    "Temp_23h_x": 0,
+    "t_max_x+1": 0,
+    "SLP_23h_x": 0
+  },
+  "plausibility_total_violations": 0,
+  "scores": {
+    "coverage_30": 9.595703240276215,
+    "target_missing_25": 10.0,
+    "schema_20": 10.0,
+    "temporal_15": 10.0,
+    "plausibility_10": 10.0,
+    "final_1_to_10": 9.88
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "run_id": "20260523T124342",
+  "module": "moira.features.build_climate_data",
+  "function": "get_weather_features",
+  "city": "new york",
+  "start": "1980-01-01",
+  "end": "2026-05-21",
+  "history_start": "1980-01-01",
+  "date_format": "%d-%m-%y",
+  "strict": false,
+  "preload": true,
+  "preload_info": {
+    "elapsed_sec": 131.10701849999896,
+    "result": {
+      "ncei_daily_year_cache": 47,
+      "isd_lite_raw_year_cache": 49,
+      "isd_lite_processed_year_cache": 49,
+      "isd_daily_23h_year_cache": 47,
+      "disk_cache_enabled": true,
+      "disk_cache_dir": "data\\external\\weather_cache_sprint3_1980_20260521"
+    }
+  },
+  "skip_existing": true,
+  "output": "data\\processed\\sprint3.csv",
+  "failed_output": "data\\processed\\sprint3_failed_rows.csv",
+  "existing_rows_before": 0,
+  "total_rows_after": 16806,
+  "total_dates_in_range": 16943,
+  "dates_to_process": 16943,
+  "processed": 16943,
+  "ok_new_records": 16806,
+  "empty_returns": 0,
+  "errors_total": 137,
+  "schema_mismatch_count": 0,
+  "ok_ratio": 0.9919140648055244,
+  "empty_ratio": 0.0,
+  "error_ratio": 0.008085935194475594,
+  "schema_mismatch_ratio": 0.0,
+  "skipped_existing": 0,
+  "error_counts": {
+    "OTHER_ERROR": 137
+  },
+  "schema_counts": {
+    "3a8d9c6af65bd6a5": 16806
+  },
+  "failed_by_year": {
+    "2026": 137
+  },
+  "failed_by_month": {
+    "2026-01": 27,
+    "2026-02": 28,
+    "2026-03": 31,
+    "2026-04": 30,
+    "2026-05": 21
+  },
+  "failed_by_temporal_bucket": {
+    "test_holdout_period": 137
+  },
+  "attempts_mean": 1.0,
+  "backoff_slept_total_sec": 0.0,
+  "elapsed_sec": 820.1480764000007,
+  "rows_per_second": 20.658464596259808,
+  "get_weather_features_kwargs": {
+    "strict": false,
+    "execution_hour": 23,
+    "nearest_tolerance_hours": 6,
+    "history_start_date": "1980-01-01",
+    "climatology_window_days": 7,
+    "min_climatology_records": 30,
+    "compute_td_anomaly": true,
+    "include_target": true
+  },
+  "builder_metadata": {
+    "module_name": "moira.features.build_climate_data",
+    "module_file": "C:\\Users\\santi\\Desktop\\Proyectos\\Moira\\src\\moira\\features\\build_climate_data.py",
+    "feature_contract_version": "sprint3_v0",
+    "feature_count_train_mode": 133,
+    "feature_count_inference_mode": 132,
+    "feature_target_key": "t_max_x+1",
+    "feature_allowed_non_numeric": [
+      "ciudad",
+      "season"
+    ],
+    "feature_allowed_missing": [
+      "Cloud_23h_x",
+      "Cloud_change_last_6h",
+      "HR_23h_ma3",
+      "HR_change_last_6h",
+      "Precip_positive_hours_00_23h",
+      "Precip_positive_hours_last_6h",
+      "SLP_change_last_12h",
+      "SLP_change_last_3h",
+      "SLP_change_last_6h",
+      "Td_change_last_6h",
+      "Temp_06h_x",
+      "Temp_12h_x",
+      "Temp_18h_x",
+      "Temp_21h_x",
+      "Temp_23h_ma3",
+      "Temp_23h_trend_3d",
+      "Temp_change_23h_1d",
+      "Temp_change_23h_minus_06h",
+      "Temp_change_23h_minus_12h",
+      "Temp_change_23h_minus_18h",
+      "Temp_change_last_12h",
+      "Temp_change_last_3h",
+      "Temp_change_last_6h",
+      "Temp_slope_last_12h",
+      "Temp_slope_last_6h",
+      "WindDir_cos_23h_x",
+      "WindDir_sin_23h_x",
+      "WindSpd_23h_ma3",
+      "WindSpd_change_last_6h",
+      "pressure_trend_3d",
+      "td_anomaly_x",
+      "wind_u",
+      "wind_v"
+    ],
+    "supported_cities": [
+      "new york"
+    ],
+    "default_nearest_tolerance_hours": 6,
+    "cache_info_before": {
+      "ncei_daily_year_cache": 0,
+      "isd_lite_raw_year_cache": 0,
+      "isd_lite_processed_year_cache": 0,
+      "isd_daily_23h_year_cache": 0,
+      "disk_cache_enabled": true,
+      "disk_cache_dir": "data\\external\\weather_cache_sprint3_1980_20260521"
+    },
+    "get_weather_features_signature": "(city: 'str', date_str: 'str', strict: 'bool' = True, execution_hour: 'int' = 23, nearest_tolerance_hours: 'int' = 6, history_start_date: 'str' = '1980-01-01', climatology_window_days: 'int' = 7, min_climatology_records: 'int' = 30, compute_td_anomaly: 'bool' = True, mode: 'str' = 'train_mode', include_target: 'bool | None' = None) -> 'dict'",
+    "get_weather_features_kwargs_effective": {
+      "strict": false,
+      "execution_hour": 23,
+      "nearest_tolerance_hours": 6,
+      "history_start_date": "1980-01-01",
+      "climatology_window_days": 7,
+      "min_climatology_records": 30,
+      "compute_td_anomaly": true,
+      "include_target": true
+    }
+  },
+  "cache_info_after": {
+    "ncei_daily_year_cache": 48,
+    "isd_lite_raw_year_cache": 49,
+    "isd_lite_processed_year_cache": 49,
+    "isd_daily_23h_year_cache": 47,
+    "disk_cache_enabled": true,
+    "disk_cache_dir": "data\\external\\weather_cache_sprint3_1980_20260521"
+  },
+  "allow_schema_variance": false,
+  "generated_at": "2026-05-23T12:57:22"
+}

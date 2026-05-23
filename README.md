@@ -5578,18 +5578,6 @@ Esta seccion resume riesgos detectados en la integracion entre `src/moira/featur
 
 </details>
 
-# Desarrollo de V1
-
-![Versión 1 image](./docs/assets/v1.png)
-
-# Desarrollo de V2
-
-![Versión 2 image](./docs/assets/v2.png)
-
-# Desarrollo de V3
-
-![Versión 3 image](./docs/assets/v3.png)
-
 <details open>
 <summary><strong>Ultimos cambios aplicados (build_climate_data)</strong></summary>
 
@@ -5664,6 +5652,7 @@ Resultados observados:
 - En `tests/contract/test_feature_contract.py` ya no persisten `strict_contract_failure_count` por desalineacion de nulls permitidos; ahora sincroniza contrato desde el builder con fallback seguro.
 
 </details>
+
 
 <details open>
 <summary><strong>Ultimos cambios aplicados (test + miner)</strong></summary>
@@ -5767,3 +5756,90 @@ Resultados observados:
 - Corrida corta real de `miner`: `processed=10`, `ok_new_records=10`, `errors_total=0`, `schema_mismatch_count=0`.
 
 </details>
+
+
+<details open>
+<summary><strong>Resumen generacion dataset Sprint 3 (1980-2026)</strong></summary>
+
+Objetivo de corrida:
+
+- Generar un dataset supervisado para entrenamiento de ML con target `t_max_x+1`.
+- Rango solicitado: `1980-01-01` a `2026-05-21` para ciudad `new york`.
+- Ejecucion con cache limpia dedicada en `data/external/weather_cache_sprint3_1980_20260521`.
+
+Comando ejecutado:
+
+```bash
+PYTHONPATH=src python -m moira.data.miner \
+  --module moira.features.build_climate_data \
+  --function get_weather_features \
+  --city "new york" \
+  --start 1980-01-01 \
+  --end 2026-05-21 \
+  --history-start 1980-01-01 \
+  --date-format "%d-%m-%y" \
+  --output ./data/processed/sprint3.csv \
+  --failed-output ./data/processed/sprint3_failed_rows.csv \
+  --metadata-output ./data/processed/sprint3_metadata.json \
+  --backup-dir ./data/processed/backups \
+  --strict false \
+  --preload true \
+  --skip-existing true \
+  --save-every 500 \
+  --max-retries 3 \
+  --backoff-base-sec 2 \
+  --backoff-jitter-sec 1 \
+  --execution-hour 23 \
+  --nearest-tolerance-hours 6 \
+  --climatology-window-days 7 \
+  --min-climatology-records 30 \
+  --compute-td-anomaly true \
+  --include-target true \
+  --allow-schema-variance false
+```
+
+Artefactos generados:
+
+```text
+./data/processed/sprint3.csv
+./data/processed/sprint3_failed_rows.csv
+./data/processed/sprint3_metadata.json
+./data/processed/sprint3_audit.json
+```
+
+Resultados principales:
+
+- Dias esperados en rango: `16943`.
+- Filas validas generadas: `16806`.
+- Cobertura total: `99.19%` (`16806 / 16943`).
+- Errores totales: `137` (todos en 2026, `OTHER_ERROR: 'datetime_local'`).
+- Esquema: `1` variante, `schema_mismatch_count=0`.
+- Target `t_max_x+1`: `target_null_rate=0.0`.
+- Duplicados por fecha: `0`.
+- Missingness promedio de features: `~1.12%`.
+
+Auditoria de utilidad para entrenamiento (escala 1-10):
+
+- Nota final: **`9.88 / 10`**.
+- Desglose:
+  - Cobertura (30%): `9.60`
+  - Target y nulos (25%): `10.00`
+  - Estabilidad de esquema (20%): `10.00`
+  - Validez temporal (15%): `10.00`
+  - Plausibilidad fisica (10%): `10.00`
+
+</details>
+
+
+
+# Desarrollo de V1
+
+![Versión 1 image](./docs/assets/v1.png)
+
+# Desarrollo de V2
+
+![Versión 2 image](./docs/assets/v2.png)
+
+# Desarrollo de V3
+
+![Versión 3 image](./docs/assets/v3.png)
