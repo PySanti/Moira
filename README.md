@@ -6019,17 +6019,6 @@ Lectura rapida:
 
 
 
-# Desarrollo de V1
-
-![Versión 1 image](./docs/assets/v1.png)
-
-# Desarrollo de V2
-
-![Versión 2 image](./docs/assets/v2.png)
-
-# Desarrollo de V3
-
-![Versión 3 image](./docs/assets/v3.png)
 
 # Sprint 4 - V0: Estudio de utilidad predictiva de features
 
@@ -6078,7 +6067,7 @@ Conclusiones para entender la brecha de rendimiento:
 - Features de anomalia/climatologia (`tmax_anomaly_*`) aparecen penalizadas por redundancia extrema, sugiriendo que su implementacion actual no esta agregando informacion independiente suficiente.
 - Parte del gap esperado vs observado puede explicarse por cambio de distribucion en variables de nubosidad/humedad y por sobredependencia en senales de temperatura muy correlacionadas.
 
-Recomendaciones directas hacia Sprint 4 - V1:
+Recomendaciones directas hacia Sprint 4 - V0:
 
 1. Reducir colinealidad: conservar 1-2 representantes por grupo termico altamente redundante.
 2. Replantear features de anomalia/climatologia para que aporten senal no redundante.
@@ -6095,3 +6084,234 @@ Graficos:
 ![Missingness by feature](./experiments/v0-sprint4/correlation_1.0/plots/missingness_by_feature.png)
 ![Top features heatmap](./experiments/v0-sprint4/correlation_1.0/plots/top_features_correlation_heatmap.png)
 ![Utility por familia](./experiments/v0-sprint4/correlation_1.0/plots/family_utility_summary.png)
+
+
+## Sprint 4 - V0: Nueva lista propuesta de features (limpieza + extension)
+
+> Esta seccion define una **lista objetivo** para la siguiente iteracion.
+> No se modifico el codigo de `feature engineering` en este paso.
+
+### 1) Features a eliminar del set actual
+
+Criterio: `utility_score` bajo/negativo, redundancia alta, drift alto o senal inestable en evaluacion externa.
+
+```text
+Cloud_23h_x
+Cloud_mean_last_6h
+Cloud_change_last_6h
+Cloud_mean_00_23h_x
+Cloud_max_00_23h_x
+
+extreme_heat_flag
+extreme_cold_flag
+
+HR_min_00_23h_x
+HR_mean_00_23h_x
+HR_mean_last_6h
+HR_23h_ma3
+
+Temp_dewpoint_spread_23h
+Temp_dewpoint_spread_mean_00_23h
+
+tmax_anomaly_x
+tmax_anomaly_vs_doy_plus1
+climatology_tmax_delta_doy_plus1_minus_x
+td_anomaly_x
+
+wind_u
+WindDir_sin_23h_x
+
+Temp_change_23h_minus_12h
+Temp_change_last_12h
+Temp_change_last_3h
+
+SLP_min_00_23h_x
+SLP_mean_00_23h_x
+
+Precip_sum_last_12h
+```
+
+### 2) Features a conservar como nucleo base
+
+Criterio: mayor utilidad predictiva y estabilidad, especialmente sobre persistencia termica y estado termodinamico cercano a la hora objetivo.
+
+```text
+Temp_23h_x
+Temp_21h_x
+Temp_18h_x
+Temp_12h_x
+Temp_06h_x
+
+Temp_min_last_6h
+Temp_mean_last_6h
+Temp_max_last_6h
+Temp_23h_ma3
+
+Tmax_so_far_23h_x
+Tmin_so_far_23h_x
+Tmean_so_far_23h_x
+MA_Tmax_3d_asof_23h
+
+tmax_lag1
+tmax_lag2
+tmax_lag3
+tmax_lag7
+tmax_ma3_completed
+tmax_ma7_completed
+tmax_ma14_completed
+tmax_std7_completed
+tmax_min7_completed
+tmax_max7_completed
+
+tmean_lag1
+tmean_lag2
+tmean_lag3
+tmean_ma3_completed
+tmean_ma7
+tmean_ma14_completed
+tmean_std7_completed
+
+Td_23h_x
+Vapor_pressure_23h
+td_ma3
+
+SLP_23h_x
+Delta_SLP_24h_23h
+pressure_trend_3d
+
+WindSpd_23h_x
+WindSpd_23h_ma3
+WindSpd_mean_last_6h
+
+month_sin
+month_cos
+doy_sin
+doy_cos
+daylight_hours_x
+daylight_hours_plus1
+daylight_delta_plus1_minus_x
+```
+
+### 3) Nuevas features a agregar (enfasis forecasting)
+
+Objetivo: mejorar generalizacion temporal, capturar cambios de regimen y enriquecer senal multihorizonte.
+
+#### 3.1 Forecasting por persistencia y extrapolacion local
+
+```text
+fc_persist_tmax_h1                = Tmax_so_far_23h_x
+fc_persist_tmean_h1               = Tmean_so_far_23h_x
+fc_linear_tmax_6h_h1              = Temp_23h_x + Temp_slope_last_6h * 1.0
+fc_linear_tmax_12h_h1             = Temp_23h_x + Temp_slope_last_12h * 1.0
+fc_damped_tmax_6h_h1              = Temp_23h_x + 0.6 * Temp_slope_last_6h
+fc_damped_tmax_12h_h1             = Temp_23h_x + 0.6 * Temp_slope_last_12h
+fc_bias_adj_from_climatology_h1   = fc_persist_tmax_h1 - climatology_tmax_doy_plus1
+fc_persist_error_proxy            = Tmax_so_far_23h_x - tmax_lag1
+```
+
+#### 3.2 Forecasting multi-horizonte autoregresivo (AR)
+
+```text
+ar_tmax_lag1_2_diff               = tmax_lag1 - tmax_lag2
+ar_tmax_lag2_3_diff               = tmax_lag2 - tmax_lag3
+ar_tmax_lag3_7_diff               = tmax_lag3 - tmax_lag7
+ar_tmax_accel_1_3                 = (tmax_lag1 - tmax_lag2) - (tmax_lag2 - tmax_lag3)
+ar_tmax_ratio_lag1_ma7            = tmax_lag1 / (tmax_ma7_completed + 1e-6)
+ar_tmax_ratio_ma3_ma14            = tmax_ma3_completed / (tmax_ma14_completed + 1e-6)
+ar_tmean_ratio_ma3_ma14           = tmean_ma3_completed / (tmean_ma14_completed + 1e-6)
+ar_tmax_zscore_7d                 = (tmax_lag1 - tmax_ma7_completed) / (tmax_std7_completed + 1e-6)
+ar_tmean_zscore_7d                = (tmean_lag1 - tmean_ma7) / (tmean_std7_completed + 1e-6)
+```
+
+#### 3.3 Regimen synoptico (cambio de masa de aire)
+
+```text
+regime_pressure_drop_24h          = -Delta_SLP_24h_23h
+regime_pressure_accel_3d          = pressure_trend_3d - SLP_change_last_12h
+regime_warm_advection_proxy       = WindSpd_23h_x * Temp_change_last_6h
+regime_cold_advection_proxy       = WindSpd_23h_x * (-Temp_change_last_6h)
+regime_humidity_jump_6h           = HR_change_last_6h
+regime_dewpoint_jump_6h           = Td_change_last_6h
+regime_stability_proxy            = Temp_dewpoint_spread_23h / (WindSpd_23h_x + 1e-6)
+regime_precip_instability_proxy   = Precip_sum_last_6h * Temp_change_last_6h
+```
+
+#### 3.4 Estacionalidad avanzada para forecasting
+
+```text
+season_phase_shift_1d_sin         = sin(2*pi*(doy+1)/365)
+season_phase_shift_1d_cos         = cos(2*pi*(doy+1)/365)
+season_temp_expected_residual     = Temp_23h_x - climatology_tmax_doy
+season_expected_nextday_gap       = climatology_tmax_doy_plus1 - climatology_tmax_doy
+season_daylight_temp_interaction  = daylight_hours_plus1 * Temp_23h_x
+season_daylight_trend_interaction = daylight_delta_plus1_minus_x * Temp_slope_last_6h
+```
+
+#### 3.5 Interacciones no lineales orientadas a modelo
+
+```text
+int_temp_humidity                 = Temp_23h_x * HR_23h_x
+int_temp_pressure                 = Temp_23h_x * SLP_23h_x
+int_temp_wind                     = Temp_23h_x * WindSpd_23h_x
+int_tmax_td                       = Tmax_so_far_23h_x - Td_23h_x
+int_tmean_pressure_trend          = Tmean_so_far_23h_x * pressure_trend_3d
+int_tmax_precip                   = Tmax_so_far_23h_x * Precip_sum_last_6h
+int_wind_pressure                 = WindSpd_23h_x * Delta_SLP_24h_23h
+int_humidity_pressure             = HR_23h_x * Delta_SLP_24h_23h
+```
+
+#### 3.6 Features de robustez para extremos
+
+```text
+extreme_recent_heat_3d            = max(tmax_lag1, tmax_lag2, tmax_lag3)
+extreme_recent_cold_3d            = min(tmax_lag1, tmax_lag2, tmax_lag3)
+extreme_range_recent_7d           = tmax_max7_completed - tmax_min7_completed
+extreme_warming_flag_3d           = 1 if ar_tmax_lag1_2_diff>0 and ar_tmax_lag2_3_diff>0 else 0
+extreme_cooling_flag_3d           = 1 if ar_tmax_lag1_2_diff<0 and ar_tmax_lag2_3_diff<0 else 0
+extreme_volatility_flag_7d        = 1 if tmax_std7_completed > p75_train else 0
+```
+
+### 4) Lista objetivo consolidada (Sprint 4 - V0)
+
+- Mantener el **nucleo base** (seccion 2).
+- Eliminar el bloque de features de baja utilidad (seccion 1).
+- Agregar todas las features de forecasting y regimen (seccion 3).
+- En entrenamiento, aplicar seleccion adicional por:
+  - `utility_score` positivo,
+  - redundancia maxima por cluster (`|corr| < 0.95` dentro del mismo grupo),
+  - estabilidad temporal minima.
+
+Resultado esperado en Sprint 4 - V0 (iteracion incremental): menor sobreajuste a senales termicas redundantes y mejor robustez en anos fuera de muestra.
+
+### 5) Impacto en cantidad de features (referencia 132/133)
+
+Tomando como referencia el contrato actual:
+
+- `132` features en inference mode.
+- `133` columnas en train mode (incluyendo target `t_max_x+1`).
+
+Aplicando esta propuesta:
+
+- Features eliminadas: `25`.
+- Features agregadas: `45`.
+- Cambio neto: `+20`.
+
+Conteo resultante esperado:
+
+```text
+Inference mode: 132 - 25 + 45 = 152 features
+Train mode:     133 - 25 + 45 = 153 columnas (incluyendo target)
+```
+
+
+# Desarrollo de V1
+
+![Versión 1 image](./docs/assets/v1.png)
+
+# Desarrollo de V2
+
+![Versión 2 image](./docs/assets/v2.png)
+
+# Desarrollo de V3
+
+![Versión 3 image](./docs/assets/v3.png)
