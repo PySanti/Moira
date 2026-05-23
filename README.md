@@ -6290,18 +6290,53 @@ Tomando como referencia el contrato actual:
 - `132` features en inference mode.
 - `133` columnas en train mode (incluyendo target `t_max_x+1`).
 
-Aplicando esta propuesta:
+Aplicando la implementacion actual de `build_climate_data` para Sprint 4 - V0:
 
-- Features eliminadas: `25`.
-- Features agregadas: `45`.
-- Cambio neto: `+20`.
+- Features eliminadas reales: `23`.
+- `season` categorica removida y reemplazada por one-hot: `-1 + 4 = +3`.
+- Features nuevas de forecast real HRRR: `36`.
+- Cambio neto total: `+16`.
+
+Nota de alcance:
+
+- Se conservan explicitamente `WindDir_sin_23h_x`, `WindDir_cos_23h_x`, `wind_u` y `wind_v`.
+- El forecast real usa HRRR historico con fallback y puede devolver `NaN` cuando no hay disponibilidad de corrida/datos.
+- Cobertura operativa recomendada para entrenamientos forecast-enabled: `2014-2026`.
 
 Conteo resultante esperado:
 
 ```text
-Inference mode: 132 - 25 + 45 = 152 features
-Train mode:     133 - 25 + 45 = 153 columnas (incluyendo target)
+Inference mode: 132 - 23 - 1 + 4 + 36 = 148 features
+Train mode:     133 - 23 - 1 + 4 + 36 = 149 columnas (incluyendo target)
 ```
+
+### 6) Cambios implementados en `build_climate_data.py` (Sprint 4 - V0)
+
+Se aplicaron cambios reales sobre `src/moira/features/build_climate_data.py` para alinear el builder con la estrategia de Sprint 4 - V0:
+
+- Contrato actualizado:
+  - `FEATURE_CONTRACT_VERSION = "sprint4_v0"`
+  - `FEATURE_COUNT_INFERENCE_MODE = 148`
+  - `FEATURE_COUNT_TRAIN_MODE = 149`
+- `season` categórica fue removida del output y reemplazada por one-hot:
+  - `season_winter`, `season_spring`, `season_summer`, `season_autumn`
+- Se mantienen explícitamente:
+  - `WindDir_sin_23h_x`, `WindDir_cos_23h_x`, `wind_u`, `wind_v`
+- Se removieron del output las 23 features de menor utilidad/degradantes definidas en este sprint.
+- Se agregaron 36 features de forecast real con prefijo `hrrr_`.
+
+Detalle de integración de forecast real:
+
+- Fuente principal: HRRR histórico (a través del endpoint histórico con modelo `ncep_hrrr`).
+- Fallback: `Open-Meteo` cuando no hay disponibilidad completa.
+- Comportamiento ante faltantes: las features HRRR pueden devolver `NaN` sin romper `strict=True`.
+- Para soportar eso, las nuevas `hrrr_*` quedaron registradas en `FEATURE_ALLOWED_MISSING`.
+
+Validación funcional realizada tras los cambios:
+
+- `py_compile` del módulo exitoso.
+- `get_weather_features(..., mode="inference_mode", strict=True)` devuelve `148` features.
+- `get_weather_features(..., mode="train_mode", strict=True)` devuelve `149` columnas e incluye `t_max_x+1`.
 
 
 # Desarrollo de V1
