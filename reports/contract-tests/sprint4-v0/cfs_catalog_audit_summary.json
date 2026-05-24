@@ -1,0 +1,330 @@
+{
+  "start": "1982-01-01",
+  "end": "2025-12-31",
+  "n_samples": 80,
+  "ok": 9,
+  "missing": 71,
+  "ok_ratio": 0.1125,
+  "rows": [
+    {
+      "date": "1982-01-28",
+      "available": false
+    },
+    {
+      "date": "1982-04-19",
+      "available": false
+    },
+    {
+      "date": "1982-07-25",
+      "available": true
+    },
+    {
+      "date": "1982-12-14",
+      "available": false
+    },
+    {
+      "date": "1983-08-26",
+      "available": false
+    },
+    {
+      "date": "1983-09-18",
+      "available": true
+    },
+    {
+      "date": "1983-12-21",
+      "available": false
+    },
+    {
+      "date": "1984-04-30",
+      "available": false
+    },
+    {
+      "date": "1984-05-07",
+      "available": false
+    },
+    {
+      "date": "1985-02-18",
+      "available": false
+    },
+    {
+      "date": "1985-11-29",
+      "available": false
+    },
+    {
+      "date": "1985-12-06",
+      "available": false
+    },
+    {
+      "date": "1986-02-28",
+      "available": false
+    },
+    {
+      "date": "1986-07-30",
+      "available": true
+    },
+    {
+      "date": "1986-10-31",
+      "available": false
+    },
+    {
+      "date": "1987-08-31",
+      "available": false
+    },
+    {
+      "date": "1988-01-22",
+      "available": false
+    },
+    {
+      "date": "1988-05-18",
+      "available": false
+    },
+    {
+      "date": "1989-02-28",
+      "available": false
+    },
+    {
+      "date": "1989-05-07",
+      "available": false
+    },
+    {
+      "date": "1991-04-13",
+      "available": false
+    },
+    {
+      "date": "1992-12-30",
+      "available": false
+    },
+    {
+      "date": "1993-11-26",
+      "available": false
+    },
+    {
+      "date": "1993-12-16",
+      "available": false
+    },
+    {
+      "date": "1994-01-03",
+      "available": false
+    },
+    {
+      "date": "1995-02-02",
+      "available": false
+    },
+    {
+      "date": "1995-09-08",
+      "available": true
+    },
+    {
+      "date": "1996-02-22",
+      "available": false
+    },
+    {
+      "date": "1996-02-25",
+      "available": true
+    },
+    {
+      "date": "1996-11-25",
+      "available": false
+    },
+    {
+      "date": "1996-12-21",
+      "available": false
+    },
+    {
+      "date": "1997-02-15",
+      "available": true
+    },
+    {
+      "date": "1997-04-15",
+      "available": false
+    },
+    {
+      "date": "1997-05-29",
+      "available": false
+    },
+    {
+      "date": "1998-12-09",
+      "available": false
+    },
+    {
+      "date": "1999-01-03",
+      "available": false
+    },
+    {
+      "date": "1999-11-12",
+      "available": true
+    },
+    {
+      "date": "2000-04-08",
+      "available": false
+    },
+    {
+      "date": "2001-04-26",
+      "available": true
+    },
+    {
+      "date": "2001-06-26",
+      "available": false
+    },
+    {
+      "date": "2001-07-27",
+      "available": false
+    },
+    {
+      "date": "2002-02-10",
+      "available": true
+    },
+    {
+      "date": "2003-01-19",
+      "available": false
+    },
+    {
+      "date": "2003-05-24",
+      "available": false
+    },
+    {
+      "date": "2003-08-31",
+      "available": false
+    },
+    {
+      "date": "2004-12-31",
+      "available": false
+    },
+    {
+      "date": "2005-05-27",
+      "available": false
+    },
+    {
+      "date": "2005-08-23",
+      "available": false
+    },
+    {
+      "date": "2006-01-20",
+      "available": false
+    },
+    {
+      "date": "2007-03-01",
+      "available": false
+    },
+    {
+      "date": "2007-03-24",
+      "available": false
+    },
+    {
+      "date": "2007-05-03",
+      "available": false
+    },
+    {
+      "date": "2007-09-21",
+      "available": false
+    },
+    {
+      "date": "2008-10-22",
+      "available": false
+    },
+    {
+      "date": "2009-04-25",
+      "available": false
+    },
+    {
+      "date": "2010-08-27",
+      "available": false
+    },
+    {
+      "date": "2010-12-26",
+      "available": false
+    },
+    {
+      "date": "2011-12-05",
+      "available": false
+    },
+    {
+      "date": "2013-06-23",
+      "available": false
+    },
+    {
+      "date": "2014-11-02",
+      "available": false
+    },
+    {
+      "date": "2016-06-26",
+      "available": false
+    },
+    {
+      "date": "2016-06-29",
+      "available": false
+    },
+    {
+      "date": "2016-07-04",
+      "available": false
+    },
+    {
+      "date": "2016-09-13",
+      "available": false
+    },
+    {
+      "date": "2017-06-10",
+      "available": false
+    },
+    {
+      "date": "2017-12-14",
+      "available": false
+    },
+    {
+      "date": "2018-04-22",
+      "available": false
+    },
+    {
+      "date": "2018-11-03",
+      "available": false
+    },
+    {
+      "date": "2019-08-02",
+      "available": false
+    },
+    {
+      "date": "2019-08-13",
+      "available": false
+    },
+    {
+      "date": "2020-03-22",
+      "available": false
+    },
+    {
+      "date": "2021-03-30",
+      "available": false
+    },
+    {
+      "date": "2021-05-31",
+      "available": false
+    },
+    {
+      "date": "2022-01-20",
+      "available": false
+    },
+    {
+      "date": "2022-06-05",
+      "available": false
+    },
+    {
+      "date": "2022-08-13",
+      "available": false
+    },
+    {
+      "date": "2022-08-21",
+      "available": false
+    },
+    {
+      "date": "2022-09-01",
+      "available": false
+    },
+    {
+      "date": "2022-11-15",
+      "available": false
+    },
+    {
+      "date": "2025-02-01",
+      "available": false
+    }
+  ]
+}

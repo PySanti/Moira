@@ -31,6 +31,11 @@ import requests
 import pandas as pd
 import numpy as np
 
+try:
+    import xarray as xr
+except Exception:  # pragma: no cover - optional dependency at runtime
+    xr = None
+
 
 # ---------------- CONFIG ----------------
 
@@ -56,6 +61,9 @@ FEATURE_CONTRACT_VERSION = "sprint4_v0"
 FEATURE_COUNT_INFERENCE_MODE = 148
 FEATURE_COUNT_TRAIN_MODE = 149
 FEATURE_TARGET_KEY = "t_max_x+1"
+GEFS_REFORECAST_BASE_URL = "https://noaa-gefs-retrospective.s3.amazonaws.com/GEFSv12/reforecast"
+GEFS_MEMBER = "c00"
+MAX_FORECAST_RUN_AGE_DAYS = 3
 
 # Contrato interno de validacion (alineable con tests/contract/test_feature_contract.py)
 FEATURE_ALLOWED_NON_NUMERIC = {"ciudad"}
@@ -86,42 +94,42 @@ FEATURE_ALLOWED_MISSING = {
     "Temp_23h_ma3",
     "Temp_23h_trend_3d",
     "WindSpd_23h_ma3",
-    "hrrr_forecast_available",
-    "hrrr_fallback_used",
-    "hrrr_run_init_utc_hour",
-    "hrrr_run_age_hours_at_execution",
-    "hrrr_lead_hours_to_x1_00h",
-    "hrrr_lead_hours_to_x1_23h",
-    "hrrr_temp_2m_x1_00h",
-    "hrrr_temp_2m_x1_03h",
-    "hrrr_temp_2m_x1_06h",
-    "hrrr_temp_2m_x1_09h",
-    "hrrr_temp_2m_x1_12h",
-    "hrrr_temp_2m_x1_15h",
-    "hrrr_temp_2m_x1_18h",
-    "hrrr_temp_2m_x1_21h",
-    "hrrr_temp_2m_x1_max",
-    "hrrr_temp_2m_x1_min",
-    "hrrr_temp_2m_x1_mean",
-    "hrrr_temp_2m_x1_range",
-    "hrrr_dewpoint_2m_x1_mean",
-    "hrrr_dewpoint_2m_x1_max",
-    "hrrr_rh_2m_x1_mean",
-    "hrrr_vpd_x1_mean",
-    "hrrr_pressure_surface_x1_mean",
-    "hrrr_pressure_surface_x1_min",
-    "hrrr_wind_10m_x1_mean",
-    "hrrr_wind_10m_x1_max",
-    "hrrr_wind_gust_x1_max",
-    "hrrr_wind_dir_10m_x1_sin_mean",
-    "hrrr_wind_dir_10m_x1_cos_mean",
-    "hrrr_cloud_cover_x1_mean",
-    "hrrr_cloud_cover_x1_max",
-    "hrrr_precip_x1_sum",
-    "hrrr_precip_x1_max_hourly",
-    "hrrr_precip_flag_x1",
-    "hrrr_tmax_vs_tmax_so_far_x",
-    "hrrr_tmax_vs_tmax_lag1",
+    "forecast_available",
+    "forecast_fallback_used",
+    "forecast_init_utc_hour",
+    "forecast_run_age_hours_at_execution",
+    "forecast_lead_hours_to_x1_00h",
+    "forecast_lead_hours_to_x1_23h",
+    "forecast_temp_2m_x1_00h",
+    "forecast_temp_2m_x1_03h",
+    "forecast_temp_2m_x1_06h",
+    "forecast_temp_2m_x1_09h",
+    "forecast_temp_2m_x1_12h",
+    "forecast_temp_2m_x1_15h",
+    "forecast_temp_2m_x1_18h",
+    "forecast_temp_2m_x1_21h",
+    "forecast_temp_2m_x1_max",
+    "forecast_temp_2m_x1_min",
+    "forecast_temp_2m_x1_mean",
+    "forecast_temp_2m_x1_range",
+    "forecast_dewpoint_2m_x1_mean",
+    "forecast_dewpoint_2m_x1_max",
+    "forecast_rh_2m_x1_mean",
+    "forecast_vpd_x1_mean",
+    "forecast_pressure_surface_x1_mean",
+    "forecast_pressure_surface_x1_min",
+    "forecast_wind_10m_x1_mean",
+    "forecast_wind_10m_x1_max",
+    "forecast_wind_gust_x1_max",
+    "forecast_wind_dir_10m_x1_sin_mean",
+    "forecast_wind_dir_10m_x1_cos_mean",
+    "forecast_cloud_cover_x1_mean",
+    "forecast_cloud_cover_x1_max",
+    "forecast_precip_x1_sum",
+    "forecast_precip_x1_max_hourly",
+    "forecast_precip_flag_x1",
+    "forecast_tmax_vs_tmax_so_far_x",
+    "forecast_tmax_vs_tmax_lag1",
 }
 
 EXPECTED_INFERENCE_FEATURES = frozenset({
@@ -149,17 +157,17 @@ EXPECTED_INFERENCE_FEATURES = frozenset({
     "tmax_trend_7d", "dtr_ma3", "td_ma3", "Temp_23h_ma3", "Temp_23h_trend_3d", "WindSpd_23h_ma3",
     "wind_u", "wind_v", "pressure_trend_3d", "month", "month_sin", "month_cos", "season_winter",
     "season_spring", "season_summer", "season_autumn", "daylight_hours_x", "daylight_hours_plus1",
-    "daylight_delta_plus1_minus_x", "hrrr_forecast_available", "hrrr_fallback_used", "hrrr_run_init_utc_hour",
-    "hrrr_run_age_hours_at_execution", "hrrr_lead_hours_to_x1_00h", "hrrr_lead_hours_to_x1_23h",
-    "hrrr_temp_2m_x1_00h", "hrrr_temp_2m_x1_03h", "hrrr_temp_2m_x1_06h", "hrrr_temp_2m_x1_09h",
-    "hrrr_temp_2m_x1_12h", "hrrr_temp_2m_x1_15h", "hrrr_temp_2m_x1_18h", "hrrr_temp_2m_x1_21h",
-    "hrrr_temp_2m_x1_max", "hrrr_temp_2m_x1_min", "hrrr_temp_2m_x1_mean", "hrrr_temp_2m_x1_range",
-    "hrrr_dewpoint_2m_x1_mean", "hrrr_dewpoint_2m_x1_max", "hrrr_rh_2m_x1_mean", "hrrr_vpd_x1_mean",
-    "hrrr_pressure_surface_x1_mean", "hrrr_pressure_surface_x1_min", "hrrr_wind_10m_x1_mean",
-    "hrrr_wind_10m_x1_max", "hrrr_wind_gust_x1_max", "hrrr_wind_dir_10m_x1_sin_mean",
-    "hrrr_wind_dir_10m_x1_cos_mean", "hrrr_cloud_cover_x1_mean", "hrrr_cloud_cover_x1_max",
-    "hrrr_precip_x1_sum", "hrrr_precip_x1_max_hourly", "hrrr_precip_flag_x1", "hrrr_tmax_vs_tmax_so_far_x",
-    "hrrr_tmax_vs_tmax_lag1", "ciudad", "doy_sin", "doy_cos",
+    "daylight_delta_plus1_minus_x", "forecast_available", "forecast_fallback_used", "forecast_init_utc_hour",
+    "forecast_run_age_hours_at_execution", "forecast_lead_hours_to_x1_00h", "forecast_lead_hours_to_x1_23h",
+    "forecast_temp_2m_x1_00h", "forecast_temp_2m_x1_03h", "forecast_temp_2m_x1_06h", "forecast_temp_2m_x1_09h",
+    "forecast_temp_2m_x1_12h", "forecast_temp_2m_x1_15h", "forecast_temp_2m_x1_18h", "forecast_temp_2m_x1_21h",
+    "forecast_temp_2m_x1_max", "forecast_temp_2m_x1_min", "forecast_temp_2m_x1_mean", "forecast_temp_2m_x1_range",
+    "forecast_dewpoint_2m_x1_mean", "forecast_dewpoint_2m_x1_max", "forecast_rh_2m_x1_mean", "forecast_vpd_x1_mean",
+    "forecast_pressure_surface_x1_mean", "forecast_pressure_surface_x1_min", "forecast_wind_10m_x1_mean",
+    "forecast_wind_10m_x1_max", "forecast_wind_gust_x1_max", "forecast_wind_dir_10m_x1_sin_mean",
+    "forecast_wind_dir_10m_x1_cos_mean", "forecast_cloud_cover_x1_mean", "forecast_cloud_cover_x1_max",
+    "forecast_precip_x1_sum", "forecast_precip_x1_max_hourly", "forecast_precip_flag_x1", "forecast_tmax_vs_tmax_so_far_x",
+    "forecast_tmax_vs_tmax_lag1", "ciudad", "doy_sin", "doy_cos",
 })
 EXPECTED_TRAIN_FEATURES = frozenset(set(EXPECTED_INFERENCE_FEATURES) | {FEATURE_TARGET_KEY})
 
@@ -313,19 +321,19 @@ def _validate_feature_contract(features: dict, is_train_mode: bool) -> list[str]
             + (" ..." if len(extra) > 20 else "")
         )
 
-    hrrr_available = features.get("hrrr_forecast_available", None)
-    if hrrr_available in (1.0, 1):
-        required_hrrr_meta = [
-            "hrrr_run_init_utc_hour",
-            "hrrr_run_age_hours_at_execution",
-            "hrrr_lead_hours_to_x1_00h",
-            "hrrr_lead_hours_to_x1_23h",
+    forecast_available = features.get("forecast_available", None)
+    if forecast_available in (1.0, 1):
+        required_forecast_meta = [
+            "forecast_init_utc_hour",
+            "forecast_run_age_hours_at_execution",
+            "forecast_lead_hours_to_x1_00h",
+            "forecast_lead_hours_to_x1_23h",
         ]
-        missing_hrrr_meta = [k for k in required_hrrr_meta if features.get(k, None) is None]
-        if missing_hrrr_meta:
+        missing_forecast_meta = [k for k in required_forecast_meta if features.get(k, None) is None]
+        if missing_forecast_meta:
             errors.append(
-                "forecast HRRR marcado como disponible sin metadata temporal completa: "
-                + ", ".join(missing_hrrr_meta)
+                "forecast marcado como disponible sin metadata temporal completa: "
+                + ", ".join(missing_forecast_meta)
             )
 
     return errors
@@ -464,55 +472,282 @@ def _nansum(values: list[float]) -> float:
     return float(np.nansum(arr))
 
 
-def _fetch_open_meteo_hrrr_day_x1(city_key: str, target_ts: pd.Timestamp) -> dict[str, float]:
-    """
-    Placeholder conservador para Sprint 4 auditoría.
-
-    No usa Open-Meteo Historical Forecast como fuente principal porque no
-    garantiza selección run/init auditable as-of 23h para evitar leakage.
-
-    Hasta integrar HRRR run-exact (p.ej. NOAA AWS), todas las hrrr_*
-    se devuelven como NaN y hrrr_forecast_available=0.
-    """
-    defaults = {
-        "hrrr_forecast_available": 0.0,
-        "hrrr_fallback_used": 0.0,
-        "hrrr_run_init_utc_hour": np.nan,
-        "hrrr_run_age_hours_at_execution": np.nan,
-        "hrrr_lead_hours_to_x1_00h": np.nan,
-        "hrrr_lead_hours_to_x1_23h": np.nan,
-        "hrrr_temp_2m_x1_00h": np.nan,
-        "hrrr_temp_2m_x1_03h": np.nan,
-        "hrrr_temp_2m_x1_06h": np.nan,
-        "hrrr_temp_2m_x1_09h": np.nan,
-        "hrrr_temp_2m_x1_12h": np.nan,
-        "hrrr_temp_2m_x1_15h": np.nan,
-        "hrrr_temp_2m_x1_18h": np.nan,
-        "hrrr_temp_2m_x1_21h": np.nan,
-        "hrrr_temp_2m_x1_max": np.nan,
-        "hrrr_temp_2m_x1_min": np.nan,
-        "hrrr_temp_2m_x1_mean": np.nan,
-        "hrrr_temp_2m_x1_range": np.nan,
-        "hrrr_dewpoint_2m_x1_mean": np.nan,
-        "hrrr_dewpoint_2m_x1_max": np.nan,
-        "hrrr_rh_2m_x1_mean": np.nan,
-        "hrrr_vpd_x1_mean": np.nan,
-        "hrrr_pressure_surface_x1_mean": np.nan,
-        "hrrr_pressure_surface_x1_min": np.nan,
-        "hrrr_wind_10m_x1_mean": np.nan,
-        "hrrr_wind_10m_x1_max": np.nan,
-        "hrrr_wind_gust_x1_max": np.nan,
-        "hrrr_wind_dir_10m_x1_sin_mean": np.nan,
-        "hrrr_wind_dir_10m_x1_cos_mean": np.nan,
-        "hrrr_cloud_cover_x1_mean": np.nan,
-        "hrrr_cloud_cover_x1_max": np.nan,
-        "hrrr_precip_x1_sum": np.nan,
-        "hrrr_precip_x1_max_hourly": np.nan,
-        "hrrr_precip_flag_x1": np.nan,
-        "hrrr_tmax_vs_tmax_so_far_x": np.nan,
-        "hrrr_tmax_vs_tmax_lag1": np.nan,
+def _forecast_default_features() -> dict[str, float]:
+    return {
+        "forecast_available": 0.0,
+        "forecast_fallback_used": 0.0,
+        "forecast_init_utc_hour": np.nan,
+        "forecast_run_age_hours_at_execution": np.nan,
+        "forecast_lead_hours_to_x1_00h": np.nan,
+        "forecast_lead_hours_to_x1_23h": np.nan,
+        "forecast_temp_2m_x1_00h": np.nan,
+        "forecast_temp_2m_x1_03h": np.nan,
+        "forecast_temp_2m_x1_06h": np.nan,
+        "forecast_temp_2m_x1_09h": np.nan,
+        "forecast_temp_2m_x1_12h": np.nan,
+        "forecast_temp_2m_x1_15h": np.nan,
+        "forecast_temp_2m_x1_18h": np.nan,
+        "forecast_temp_2m_x1_21h": np.nan,
+        "forecast_temp_2m_x1_max": np.nan,
+        "forecast_temp_2m_x1_min": np.nan,
+        "forecast_temp_2m_x1_mean": np.nan,
+        "forecast_temp_2m_x1_range": np.nan,
+        "forecast_dewpoint_2m_x1_mean": np.nan,
+        "forecast_dewpoint_2m_x1_max": np.nan,
+        "forecast_rh_2m_x1_mean": np.nan,
+        "forecast_vpd_x1_mean": np.nan,
+        "forecast_pressure_surface_x1_mean": np.nan,
+        "forecast_pressure_surface_x1_min": np.nan,
+        "forecast_wind_10m_x1_mean": np.nan,
+        "forecast_wind_10m_x1_max": np.nan,
+        "forecast_wind_gust_x1_max": np.nan,
+        "forecast_wind_dir_10m_x1_sin_mean": np.nan,
+        "forecast_wind_dir_10m_x1_cos_mean": np.nan,
+        "forecast_cloud_cover_x1_mean": np.nan,
+        "forecast_cloud_cover_x1_max": np.nan,
+        "forecast_precip_x1_sum": np.nan,
+        "forecast_precip_x1_max_hourly": np.nan,
+        "forecast_precip_flag_x1": np.nan,
+        "forecast_tmax_vs_tmax_so_far_x": np.nan,
+        "forecast_tmax_vs_tmax_lag1": np.nan,
     }
-    return defaults
+
+
+def _download_gefs_file(init_utc: pd.Timestamp, var_file: str) -> Path | None:
+    year = int(init_utc.year)
+    init_code = init_utc.strftime("%Y%m%d%H")
+    url = (
+        f"{GEFS_REFORECAST_BASE_URL}/{year}/{init_code}/{GEFS_MEMBER}/Days:1-10/"
+        f"{var_file}_{init_code}_{GEFS_MEMBER}.grib2"
+    )
+    cache_path = CACHE_DIR / "reforecast_grib" / str(year) / f"{var_file}_{init_code}_{GEFS_MEMBER}.grib2"
+    if cache_path.exists():
+        return cache_path
+    try:
+        r = requests.get(url, timeout=40)
+        if r.status_code != 200:
+            return None
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(r.content)
+        return cache_path
+    except Exception:
+        return None
+
+
+def _extract_gefs_series(
+    grib_path: Path | None,
+    lat: float,
+    lon: float,
+    variable_name: str,
+    target_day_local: pd.Timestamp,
+    tz: str,
+    filter_by_keys: dict | None = None,
+) -> pd.Series:
+    if xr is None or grib_path is None:
+        return pd.Series(dtype=float)
+    try:
+        backend_kwargs = {"indexpath": ""}
+        if filter_by_keys:
+            backend_kwargs["filter_by_keys"] = filter_by_keys
+        ds = xr.open_dataset(grib_path, engine="cfgrib", backend_kwargs=backend_kwargs)
+    except Exception:
+        return pd.Series(dtype=float)
+    if variable_name not in ds.variables:
+        return pd.Series(dtype=float)
+    try:
+        arr = ds[variable_name].sel(latitude=lat, longitude=(lon % 360), method="nearest")
+    except Exception:
+        try:
+            arr = ds[variable_name].sel(latitude=lat, longitude=lon, method="nearest")
+        except Exception:
+            return pd.Series(dtype=float)
+
+    if "time" not in arr.coords and "valid_time" not in arr.coords:
+        return pd.Series(dtype=float)
+
+    if "valid_time" in arr.coords:
+        times_raw = arr["valid_time"].values
+    else:
+        times_raw = arr["time"].values
+
+    times_utc = pd.to_datetime(np.asarray(times_raw).reshape(-1), utc=True)
+    vals = np.asarray(arr.values, dtype=float).reshape(-1)
+    records: list[tuple[pd.Timestamp, float]] = []
+    for ts_utc, val in zip(times_utc, vals):
+        if pd.isna(val):
+            continue
+        ts_local = ts_utc.tz_convert(tz)
+        if ts_local.date() != target_day_local.date():
+            continue
+        records.append((ts_local, float(val)))
+
+    if not records:
+        return pd.Series(dtype=float)
+
+    out = pd.Series({k: v for k, v in records}).sort_index()
+    return out
+
+
+def _sample_local_slots(series: pd.Series, slots: list[pd.Timestamp], tolerance_hours: int = 2) -> list[float]:
+    if series.empty:
+        return [np.nan for _ in slots]
+
+    values: list[float] = []
+    for slot in slots:
+        nearest_idx = series.index.get_indexer([slot], method="nearest", tolerance=pd.Timedelta(hours=tolerance_hours))
+        pos = int(nearest_idx[0]) if len(nearest_idx) else -1
+        if pos < 0:
+            values.append(np.nan)
+        else:
+            values.append(float(series.iloc[pos]))
+    return values
+
+
+def _fetch_gefs_reforecast_day_x1(
+    city_key: str,
+    target_ts: pd.Timestamp,
+    execution_hour: int,
+) -> dict[str, float]:
+    defaults = _forecast_default_features()
+    coords = CITY_COORDS[city_key]
+    tz = coords["tz"]
+    if xr is None:
+        return defaults
+
+    day_x = pd.Timestamp(target_ts).normalize()
+    day_x1_local = (day_x + pd.Timedelta(days=1)).tz_localize(tz)
+    x1_slots = [day_x1_local + pd.Timedelta(hours=h) for h in range(0, 24, 3)]
+
+    init_candidates = [
+        (day_x - pd.Timedelta(days=d)).tz_localize("UTC")
+        for d in range(0, MAX_FORECAST_RUN_AGE_DAYS + 1)
+    ]
+
+    selected_init = None
+    temp_path = None
+    for cand in init_candidates:
+        p = _download_gefs_file(cand, "tmp_2m")
+        if p is not None:
+            selected_init = cand
+            temp_path = p
+            break
+
+    if selected_init is None or temp_path is None:
+        return defaults
+
+    temp_series = _extract_gefs_series(
+        grib_path=temp_path,
+        lat=float(coords["lat"]),
+        lon=float(coords["lon"]),
+        variable_name="t2m",
+        target_day_local=day_x1_local,
+        tz=tz,
+        filter_by_keys={"typeOfLevel": "heightAboveGround", "level": 2},
+    )
+    temp_3h = _sample_local_slots(temp_series, x1_slots, tolerance_hours=2)
+
+    if np.isnan(np.asarray(temp_3h, dtype=float)).any():
+        return defaults
+
+    # Optional fields (best effort)
+    dpt_path = _download_gefs_file(selected_init, "dpt_2m")
+    ugrd_path = _download_gefs_file(selected_init, "ugrd_hgt")
+    vgrd_path = _download_gefs_file(selected_init, "vgrd_hgt")
+    apcp_path = _download_gefs_file(selected_init, "apcp_sfc")
+
+    dpt_series = _extract_gefs_series(
+        dpt_path,
+        float(coords["lat"]),
+        float(coords["lon"]),
+        "d2m",
+        day_x1_local,
+        tz,
+        filter_by_keys={"typeOfLevel": "heightAboveGround", "level": 2},
+    ) if dpt_path is not None else pd.Series(dtype=float)
+
+    ugrd_series = _extract_gefs_series(
+        ugrd_path,
+        float(coords["lat"]),
+        float(coords["lon"]),
+        "u10",
+        day_x1_local,
+        tz,
+        filter_by_keys={"typeOfLevel": "heightAboveGround", "level": 10},
+    ) if ugrd_path is not None else pd.Series(dtype=float)
+    vgrd_series = _extract_gefs_series(
+        vgrd_path,
+        float(coords["lat"]),
+        float(coords["lon"]),
+        "v10",
+        day_x1_local,
+        tz,
+        filter_by_keys={"typeOfLevel": "heightAboveGround", "level": 10},
+    ) if vgrd_path is not None else pd.Series(dtype=float)
+
+    apcp_series = _extract_gefs_series(
+        apcp_path,
+        float(coords["lat"]),
+        float(coords["lon"]),
+        "tp",
+        day_x1_local,
+        tz,
+        filter_by_keys={"typeOfLevel": "surface"},
+    ) if apcp_path is not None else pd.Series(dtype=float)
+
+    dew_3h = _sample_local_slots(dpt_series, x1_slots, tolerance_hours=2)
+    wind_u_3h = _sample_local_slots(ugrd_series, x1_slots, tolerance_hours=2)
+    wind_v_3h = _sample_local_slots(vgrd_series, x1_slots, tolerance_hours=2)
+    precip_3h = _sample_local_slots(apcp_series, x1_slots, tolerance_hours=2)
+
+    wind_spd_3h = [
+        np.sqrt((u ** 2) + (v ** 2)) if pd.notna(u) and pd.notna(v) else np.nan
+        for u, v in zip(wind_u_3h, wind_v_3h)
+    ]
+    wind_dir_3h = [
+        (np.degrees(np.arctan2(u, v)) + 180.0) % 360.0 if pd.notna(u) and pd.notna(v) else np.nan
+        for u, v in zip(wind_u_3h, wind_v_3h)
+    ]
+    wind_dir_rad = np.radians(np.asarray(wind_dir_3h, dtype=float))
+
+    run_age_hours = float(((day_x.tz_localize("UTC") - selected_init) / pd.Timedelta(hours=1)))
+    out = _forecast_default_features()
+    out.update({
+        "forecast_available": 1.0,
+        "forecast_fallback_used": 0.0,
+        "forecast_init_utc_hour": float(selected_init.hour),
+        "forecast_run_age_hours_at_execution": run_age_hours,
+        "forecast_lead_hours_to_x1_00h": 24.0 + run_age_hours,
+        "forecast_lead_hours_to_x1_23h": 47.0 + run_age_hours,
+        "forecast_temp_2m_x1_00h": temp_3h[0],
+        "forecast_temp_2m_x1_03h": temp_3h[1],
+        "forecast_temp_2m_x1_06h": temp_3h[2],
+        "forecast_temp_2m_x1_09h": temp_3h[3],
+        "forecast_temp_2m_x1_12h": temp_3h[4],
+        "forecast_temp_2m_x1_15h": temp_3h[5],
+        "forecast_temp_2m_x1_18h": temp_3h[6],
+        "forecast_temp_2m_x1_21h": temp_3h[7],
+        "forecast_temp_2m_x1_max": _nanmax(temp_3h),
+        "forecast_temp_2m_x1_min": _nanmin(temp_3h),
+        "forecast_temp_2m_x1_mean": _nanmean(temp_3h),
+        "forecast_temp_2m_x1_range": _safe_sub(_nanmax(temp_3h), _nanmin(temp_3h)),
+        "forecast_dewpoint_2m_x1_mean": _nanmean(dew_3h),
+        "forecast_dewpoint_2m_x1_max": _nanmax(dew_3h),
+        "forecast_rh_2m_x1_mean": np.nan,
+        "forecast_vpd_x1_mean": np.nan,
+        "forecast_pressure_surface_x1_mean": np.nan,
+        "forecast_pressure_surface_x1_min": np.nan,
+        "forecast_wind_10m_x1_mean": _nanmean(wind_spd_3h),
+        "forecast_wind_10m_x1_max": _nanmax(wind_spd_3h),
+        "forecast_wind_gust_x1_max": np.nan,
+        "forecast_wind_dir_10m_x1_sin_mean": _nanmean(np.sin(wind_dir_rad).tolist()),
+        "forecast_wind_dir_10m_x1_cos_mean": _nanmean(np.cos(wind_dir_rad).tolist()),
+        "forecast_cloud_cover_x1_mean": np.nan,
+        "forecast_cloud_cover_x1_max": np.nan,
+        "forecast_precip_x1_sum": _nansum(precip_3h),
+        "forecast_precip_x1_max_hourly": _nanmax(precip_3h),
+        "forecast_precip_flag_x1": 1.0 if pd.notna(_nansum(precip_3h)) and _nansum(precip_3h) > 0 else 0.0,
+    })
+    return out
 
 
 def _resolve_feature_mode(mode: str, include_target: bool | None) -> str:
@@ -1622,7 +1857,7 @@ def get_weather_features(
     Features:
       - Variables horarias vienen de ISD-Lite / sensores de LaGuardia.
       - Tmax/Tmin/Tmean del día X se calculan desde 00:00 hasta 23:00.
-      - Incluye columnas hrrr_* reservadas para forecast real run-exact.
+      - Incluye columnas forecast_* reservadas para forecast real run-exact.
         Mientras no exista fuente run/init auditable, estas columnas quedan NaN.
     """
     city_key = city.lower().strip()
@@ -2181,11 +2416,18 @@ def get_weather_features(
     daylight_hours_plus1 = _daylight_hours(CITY_COORDS[city_key]["lat"], doy_plus1)
     daylight_delta_plus1_minus_x = daylight_hours_plus1 - daylight_hours_x
 
-    hrrr = _fetch_open_meteo_hrrr_day_x1(city_key=city_key, target_ts=target_ts)
-    hrrr_tmax_vs_tmax_so_far_x = _safe_sub(hrrr.get("hrrr_temp_2m_x1_max", np.nan), tmax_so_far_23h_x)
-    hrrr_tmax_vs_tmax_lag1 = _safe_sub(hrrr.get("hrrr_temp_2m_x1_max", np.nan), tmax_lag1)
-    hrrr["hrrr_tmax_vs_tmax_so_far_x"] = hrrr_tmax_vs_tmax_so_far_x
-    hrrr["hrrr_tmax_vs_tmax_lag1"] = hrrr_tmax_vs_tmax_lag1
+    forecast = _fetch_gefs_reforecast_day_x1(
+        city_key=city_key,
+        target_ts=target_ts,
+        execution_hour=execution_hour,
+    )
+    if strict and forecast.get("forecast_available") not in {1.0, 1}:
+        print("Error: no hay forecast auditable disponible as-of execution_hour para esta fecha.")
+        return {}
+    forecast_tmax_vs_tmax_so_far_x = _safe_sub(forecast.get("forecast_temp_2m_x1_max", np.nan), tmax_so_far_23h_x)
+    forecast_tmax_vs_tmax_lag1 = _safe_sub(forecast.get("forecast_temp_2m_x1_max", np.nan), tmax_lag1)
+    forecast["forecast_tmax_vs_tmax_so_far_x"] = forecast_tmax_vs_tmax_so_far_x
+    forecast["forecast_tmax_vs_tmax_lag1"] = forecast_tmax_vs_tmax_lag1
 
     features = {
         # Base as-of 23h
@@ -2305,43 +2547,43 @@ def get_weather_features(
         "daylight_hours_plus1": _safe(daylight_hours_plus1),
         "daylight_delta_plus1_minus_x": _safe(daylight_delta_plus1_minus_x),
 
-        # Forecast real HRRR reservado para run-exact auditable.
-        "hrrr_forecast_available": _safe(hrrr.get("hrrr_forecast_available", np.nan)),
-        "hrrr_fallback_used": _safe(hrrr.get("hrrr_fallback_used", np.nan)),
-        "hrrr_run_init_utc_hour": _safe(hrrr.get("hrrr_run_init_utc_hour", np.nan)),
-        "hrrr_run_age_hours_at_execution": _safe(hrrr.get("hrrr_run_age_hours_at_execution", np.nan)),
-        "hrrr_lead_hours_to_x1_00h": _safe(hrrr.get("hrrr_lead_hours_to_x1_00h", np.nan)),
-        "hrrr_lead_hours_to_x1_23h": _safe(hrrr.get("hrrr_lead_hours_to_x1_23h", np.nan)),
-        "hrrr_temp_2m_x1_00h": _safe(hrrr.get("hrrr_temp_2m_x1_00h", np.nan)),
-        "hrrr_temp_2m_x1_03h": _safe(hrrr.get("hrrr_temp_2m_x1_03h", np.nan)),
-        "hrrr_temp_2m_x1_06h": _safe(hrrr.get("hrrr_temp_2m_x1_06h", np.nan)),
-        "hrrr_temp_2m_x1_09h": _safe(hrrr.get("hrrr_temp_2m_x1_09h", np.nan)),
-        "hrrr_temp_2m_x1_12h": _safe(hrrr.get("hrrr_temp_2m_x1_12h", np.nan)),
-        "hrrr_temp_2m_x1_15h": _safe(hrrr.get("hrrr_temp_2m_x1_15h", np.nan)),
-        "hrrr_temp_2m_x1_18h": _safe(hrrr.get("hrrr_temp_2m_x1_18h", np.nan)),
-        "hrrr_temp_2m_x1_21h": _safe(hrrr.get("hrrr_temp_2m_x1_21h", np.nan)),
-        "hrrr_temp_2m_x1_max": _safe(hrrr.get("hrrr_temp_2m_x1_max", np.nan)),
-        "hrrr_temp_2m_x1_min": _safe(hrrr.get("hrrr_temp_2m_x1_min", np.nan)),
-        "hrrr_temp_2m_x1_mean": _safe(hrrr.get("hrrr_temp_2m_x1_mean", np.nan)),
-        "hrrr_temp_2m_x1_range": _safe(hrrr.get("hrrr_temp_2m_x1_range", np.nan)),
-        "hrrr_dewpoint_2m_x1_mean": _safe(hrrr.get("hrrr_dewpoint_2m_x1_mean", np.nan)),
-        "hrrr_dewpoint_2m_x1_max": _safe(hrrr.get("hrrr_dewpoint_2m_x1_max", np.nan)),
-        "hrrr_rh_2m_x1_mean": _safe(hrrr.get("hrrr_rh_2m_x1_mean", np.nan)),
-        "hrrr_vpd_x1_mean": _safe(hrrr.get("hrrr_vpd_x1_mean", np.nan)),
-        "hrrr_pressure_surface_x1_mean": _safe(hrrr.get("hrrr_pressure_surface_x1_mean", np.nan)),
-        "hrrr_pressure_surface_x1_min": _safe(hrrr.get("hrrr_pressure_surface_x1_min", np.nan)),
-        "hrrr_wind_10m_x1_mean": _safe(hrrr.get("hrrr_wind_10m_x1_mean", np.nan)),
-        "hrrr_wind_10m_x1_max": _safe(hrrr.get("hrrr_wind_10m_x1_max", np.nan)),
-        "hrrr_wind_gust_x1_max": _safe(hrrr.get("hrrr_wind_gust_x1_max", np.nan)),
-        "hrrr_wind_dir_10m_x1_sin_mean": _safe(hrrr.get("hrrr_wind_dir_10m_x1_sin_mean", np.nan)),
-        "hrrr_wind_dir_10m_x1_cos_mean": _safe(hrrr.get("hrrr_wind_dir_10m_x1_cos_mean", np.nan)),
-        "hrrr_cloud_cover_x1_mean": _safe(hrrr.get("hrrr_cloud_cover_x1_mean", np.nan)),
-        "hrrr_cloud_cover_x1_max": _safe(hrrr.get("hrrr_cloud_cover_x1_max", np.nan)),
-        "hrrr_precip_x1_sum": _safe(hrrr.get("hrrr_precip_x1_sum", np.nan)),
-        "hrrr_precip_x1_max_hourly": _safe(hrrr.get("hrrr_precip_x1_max_hourly", np.nan)),
-        "hrrr_precip_flag_x1": _safe(hrrr.get("hrrr_precip_flag_x1", np.nan)),
-        "hrrr_tmax_vs_tmax_so_far_x": _safe(hrrr.get("hrrr_tmax_vs_tmax_so_far_x", np.nan)),
-        "hrrr_tmax_vs_tmax_lag1": _safe(hrrr.get("hrrr_tmax_vs_tmax_lag1", np.nan)),
+        # Forecast reservado para run-exact auditable.
+        "forecast_available": _safe(forecast.get("forecast_available", np.nan)),
+        "forecast_fallback_used": _safe(forecast.get("forecast_fallback_used", np.nan)),
+        "forecast_init_utc_hour": _safe(forecast.get("forecast_init_utc_hour", np.nan)),
+        "forecast_run_age_hours_at_execution": _safe(forecast.get("forecast_run_age_hours_at_execution", np.nan)),
+        "forecast_lead_hours_to_x1_00h": _safe(forecast.get("forecast_lead_hours_to_x1_00h", np.nan)),
+        "forecast_lead_hours_to_x1_23h": _safe(forecast.get("forecast_lead_hours_to_x1_23h", np.nan)),
+        "forecast_temp_2m_x1_00h": _safe(forecast.get("forecast_temp_2m_x1_00h", np.nan)),
+        "forecast_temp_2m_x1_03h": _safe(forecast.get("forecast_temp_2m_x1_03h", np.nan)),
+        "forecast_temp_2m_x1_06h": _safe(forecast.get("forecast_temp_2m_x1_06h", np.nan)),
+        "forecast_temp_2m_x1_09h": _safe(forecast.get("forecast_temp_2m_x1_09h", np.nan)),
+        "forecast_temp_2m_x1_12h": _safe(forecast.get("forecast_temp_2m_x1_12h", np.nan)),
+        "forecast_temp_2m_x1_15h": _safe(forecast.get("forecast_temp_2m_x1_15h", np.nan)),
+        "forecast_temp_2m_x1_18h": _safe(forecast.get("forecast_temp_2m_x1_18h", np.nan)),
+        "forecast_temp_2m_x1_21h": _safe(forecast.get("forecast_temp_2m_x1_21h", np.nan)),
+        "forecast_temp_2m_x1_max": _safe(forecast.get("forecast_temp_2m_x1_max", np.nan)),
+        "forecast_temp_2m_x1_min": _safe(forecast.get("forecast_temp_2m_x1_min", np.nan)),
+        "forecast_temp_2m_x1_mean": _safe(forecast.get("forecast_temp_2m_x1_mean", np.nan)),
+        "forecast_temp_2m_x1_range": _safe(forecast.get("forecast_temp_2m_x1_range", np.nan)),
+        "forecast_dewpoint_2m_x1_mean": _safe(forecast.get("forecast_dewpoint_2m_x1_mean", np.nan)),
+        "forecast_dewpoint_2m_x1_max": _safe(forecast.get("forecast_dewpoint_2m_x1_max", np.nan)),
+        "forecast_rh_2m_x1_mean": _safe(forecast.get("forecast_rh_2m_x1_mean", np.nan)),
+        "forecast_vpd_x1_mean": _safe(forecast.get("forecast_vpd_x1_mean", np.nan)),
+        "forecast_pressure_surface_x1_mean": _safe(forecast.get("forecast_pressure_surface_x1_mean", np.nan)),
+        "forecast_pressure_surface_x1_min": _safe(forecast.get("forecast_pressure_surface_x1_min", np.nan)),
+        "forecast_wind_10m_x1_mean": _safe(forecast.get("forecast_wind_10m_x1_mean", np.nan)),
+        "forecast_wind_10m_x1_max": _safe(forecast.get("forecast_wind_10m_x1_max", np.nan)),
+        "forecast_wind_gust_x1_max": _safe(forecast.get("forecast_wind_gust_x1_max", np.nan)),
+        "forecast_wind_dir_10m_x1_sin_mean": _safe(forecast.get("forecast_wind_dir_10m_x1_sin_mean", np.nan)),
+        "forecast_wind_dir_10m_x1_cos_mean": _safe(forecast.get("forecast_wind_dir_10m_x1_cos_mean", np.nan)),
+        "forecast_cloud_cover_x1_mean": _safe(forecast.get("forecast_cloud_cover_x1_mean", np.nan)),
+        "forecast_cloud_cover_x1_max": _safe(forecast.get("forecast_cloud_cover_x1_max", np.nan)),
+        "forecast_precip_x1_sum": _safe(forecast.get("forecast_precip_x1_sum", np.nan)),
+        "forecast_precip_x1_max_hourly": _safe(forecast.get("forecast_precip_x1_max_hourly", np.nan)),
+        "forecast_precip_flag_x1": _safe(forecast.get("forecast_precip_flag_x1", np.nan)),
+        "forecast_tmax_vs_tmax_so_far_x": _safe(forecast.get("forecast_tmax_vs_tmax_so_far_x", np.nan)),
+        "forecast_tmax_vs_tmax_lag1": _safe(forecast.get("forecast_tmax_vs_tmax_lag1", np.nan)),
 
         # Metadata / estacionalidad
         "ciudad": city,

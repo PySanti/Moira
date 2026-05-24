@@ -610,6 +610,8 @@ def resolve_contract_config(module, args) -> dict[str, Any]:
     exported_allowed_non_numeric = getattr(module, "FEATURE_ALLOWED_NON_NUMERIC", None)
     exported_allowed_missing = getattr(module, "FEATURE_ALLOWED_MISSING", None)
     exported_supported_cities = getattr(module, "SUPPORTED_CITIES", None)
+    exported_expected_train = getattr(module, "EXPECTED_TRAIN_FEATURES", None)
+    exported_expected_inference = getattr(module, "EXPECTED_INFERENCE_FEATURES", None)
 
     used_exports = any(
         value is not None
@@ -664,66 +666,9 @@ def resolve_contract_config(module, args) -> dict[str, Any]:
         "allowed_non_numeric": allowed_non_numeric,
         "allowed_missing": allowed_missing,
         "supported_cities": supported_cities,
+        "expected_train_features": _normalize_string_set(exported_expected_train, set()),
+        "expected_inference_features": _normalize_string_set(exported_expected_inference, set()),
     }
-
-
-def sprint3_required_feature_keys(include_target: bool, target_key: str = "t_max_x+1") -> set[str]:
-    keys = {
-        "Tmax_so_far_23h_x",
-        "Tmin_so_far_23h_x",
-        "Tmean_so_far_23h_x",
-        "Temp_23h_x",
-        "DTR_so_far_23h_x",
-        "HR_23h_x",
-        "Td_23h_x",
-        "SLP_23h_x",
-        "WindSpd_23h_x",
-        "Cloud_23h_x",
-        "Precip_sum_00_23h_x",
-        "Temp_std_00_23h_x",
-        "Td_mean_00_23h_x",
-        "HR_mean_00_23h_x",
-        "SLP_mean_00_23h_x",
-        "WindSpd_mean_00_23h_x",
-        "Cloud_mean_00_23h_x",
-        "Precip_sum_last_6h",
-        "Temp_dewpoint_spread_23h",
-        "Vapor_pressure_23h",
-        "climatology_tmax_doy",
-        "climatology_tmax_doy_plus1",
-        "climatology_tmax_delta_doy_plus1_minus_x",
-        "tmax_anomaly_x",
-        "tmax_anomaly_vs_doy_plus1",
-        "tmax_lag1",
-        "tmin_lag1",
-        "tmean_lag1",
-        "tmax_ma7_completed",
-        "tmean_ma7",
-        "dtr_ma7_completed",
-        "Temp_23h_ma3",
-        "HR_23h_ma3",
-        "WindSpd_23h_ma3",
-        "wind_u",
-        "wind_v",
-        "pressure_trend_3d",
-        "month",
-        "month_sin",
-        "month_cos",
-        "season",
-        "extreme_heat_flag",
-        "extreme_cold_flag",
-        "daylight_hours_x",
-        "daylight_hours_plus1",
-        "daylight_delta_plus1_minus_x",
-        "ciudad",
-        "doy_sin",
-        "doy_cos",
-    }
-
-    if include_target:
-        keys.add(target_key)
-
-    return keys
 
 
 def approx_equal(a: Any, b: Any, tol: float = 1e-6) -> bool:
@@ -775,13 +720,19 @@ def validate_build_climate_row(
         )
 
     target_key = contract_cfg["target_key"]
-    required_keys = sprint3_required_feature_keys(include_target=has_target, target_key=target_key)
-    missing_keys = sorted(required_keys - set(features.keys()))
-
-    if missing_keys:
-        failures.append(
-            "missing_required_keys=" + ", ".join(missing_keys[:25])
-        )
+    expected_schema = (
+        contract_cfg["expected_train_features"]
+        if has_target
+        else contract_cfg["expected_inference_features"]
+    )
+    if expected_schema:
+        actual_keys = set(features.keys())
+        missing_keys = sorted(expected_schema - actual_keys)
+        extra_keys = sorted(actual_keys - expected_schema)
+        if missing_keys:
+            failures.append("missing_exact_keys=" + ", ".join(missing_keys[:25]))
+        if extra_keys:
+            failures.append("extra_exact_keys=" + ", ".join(extra_keys[:25]))
 
     if has_target and target_key not in features:
         failures.append(f"train_mode missing {target_key}")
@@ -793,31 +744,14 @@ def validate_build_climate_row(
     if not isinstance(ciudad, str) or ciudad.strip().lower() != args.city.strip().lower():
         failures.append(f"ciudad invalid: {ciudad!r}")
 
-    season = features.get("season")
     month = features.get("month")
-    month_to_season = {
-        12: "winter",
-        1: "winter",
-        2: "winter",
-        3: "spring",
-        4: "spring",
-        5: "spring",
-        6: "summer",
-        7: "summer",
-        8: "summer",
-        9: "autumn",
-        10: "autumn",
-        11: "autumn",
-    }
 
     if is_null(month):
         failures.append(f"month invalid: {month!r}")
     else:
         month_int = int(month)
-        if month_int not in month_to_season:
+        if month_int < 1 or month_int > 12:
             failures.append(f"month invalid: {month!r}")
-        elif season != month_to_season[month_int]:
-            failures.append(f"season/month mismatch: season={season!r} month={month!r}")
 
     null_allowed = contract_cfg["allowed_missing"]
     allowed_non_numeric = contract_cfg["allowed_non_numeric"]
@@ -841,29 +775,6 @@ def validate_build_climate_row(
         expected = float(features["Tmax_so_far_23h_x"]) - float(features["Tmin_so_far_23h_x"])
         if not approx_equal(features["Temp_range_00_23h_x"], expected):
             failures.append("Temp_range_00_23h_x invariant failed")
-
-    if not any(is_null(features.get(k)) for k in ["Temp_dewpoint_spread_23h", "Temp_23h_x", "Td_23h_x"]):
-        expected = float(features["Temp_23h_x"]) - float(features["Td_23h_x"])
-        if not approx_equal(features["Temp_dewpoint_spread_23h"], expected):
-            failures.append("Temp_dewpoint_spread_23h invariant failed")
-
-    if not any(is_null(features.get(k)) for k in ["tmax_anomaly_x", "Tmax_so_far_23h_x", "climatology_tmax_doy"]):
-        expected = float(features["Tmax_so_far_23h_x"]) - float(features["climatology_tmax_doy"])
-        if not approx_equal(features["tmax_anomaly_x"], expected):
-            failures.append("tmax_anomaly_x invariant failed")
-
-    if not any(is_null(features.get(k)) for k in ["tmax_anomaly_vs_doy_plus1", "Tmax_so_far_23h_x", "climatology_tmax_doy_plus1"]):
-        expected = float(features["Tmax_so_far_23h_x"]) - float(features["climatology_tmax_doy_plus1"])
-        if not approx_equal(features["tmax_anomaly_vs_doy_plus1"], expected):
-            failures.append("tmax_anomaly_vs_doy_plus1 invariant failed")
-
-    if not any(is_null(features.get(k)) for k in ["climatology_tmax_delta_doy_plus1_minus_x", "climatology_tmax_doy_plus1", "climatology_tmax_doy"]):
-        expected = (
-            float(features["climatology_tmax_doy_plus1"])
-            - float(features["climatology_tmax_doy"])
-        )
-        if not approx_equal(features["climatology_tmax_delta_doy_plus1_minus_x"], expected):
-            failures.append("climatology_tmax_delta_doy_plus1_minus_x invariant failed")
 
     if not any(is_null(features.get(k)) for k in ["wind_u", "WindSpd_23h_x", "WindDir_sin_23h_x"]):
         expected = float(features["WindSpd_23h_x"]) * float(features["WindDir_sin_23h_x"])
@@ -893,10 +804,32 @@ def validate_build_climate_row(
             if not math.isclose(radius, 1.0, rel_tol=1e-5, abs_tol=1e-5):
                 failures.append(f"{label}_sin_cos invariant failed")
 
-    for binary_key in ["extreme_heat_flag", "extreme_cold_flag", "Precip_flag_00_23h"]:
+    for binary_key in ["Precip_flag_00_23h"]:
         value = features.get(binary_key)
         if not is_null(value) and value not in {0, 0.0, 1, 1.0}:
             failures.append(f"{binary_key} must be binary, got {value!r}")
+
+    forecast_available = features.get("forecast_available")
+    if forecast_available in {1, 1.0}:
+        required_forecast_meta = [
+            "forecast_init_utc_hour",
+            "forecast_run_age_hours_at_execution",
+            "forecast_lead_hours_to_x1_00h",
+            "forecast_lead_hours_to_x1_23h",
+        ]
+        for key in required_forecast_meta:
+            if is_null(features.get(key)):
+                failures.append(f"{key} required when forecast_available=1")
+
+        run_hour = features.get("forecast_init_utc_hour")
+        if not is_null(run_hour):
+            hour = float(run_hour)
+            if hour < 0 or hour > 23:
+                failures.append("forecast_init_utc_hour out of range")
+
+        run_age = features.get("forecast_run_age_hours_at_execution")
+        if not is_null(run_age) and float(run_age) < 0:
+            failures.append("forecast_run_age_hours_at_execution must be >= 0")
 
     return failures
 

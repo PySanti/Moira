@@ -1,0 +1,3 @@
+date,date_str,ok,empty,duration_sec,attempts,slept_backoff_sec,error_type,error_msg,schema_hash,feature_count,null_count,non_finite_numeric_count,strict_failure_count,strict_failures_json
+2024-01-01,01-01-24,False,True,17.746918299999834,1,0.0,,,,0,0,0,0,[]
+2024-01-03,03-01-24,False,True,17.32028450000007,1,0.0,,,,0,0,0,0,[]

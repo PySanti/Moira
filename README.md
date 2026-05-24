@@ -6294,13 +6294,13 @@ Aplicando la implementacion actual de `build_climate_data` para Sprint 4 - V0:
 
 - Features eliminadas reales: `23`.
 - `season` categorica removida y reemplazada por one-hot: `-1 + 4 = +3`.
-- Features nuevas de forecast real HRRR: `36`.
+- Features nuevas de forecast real: `36`.
 - Cambio neto total: `+16`.
 
 Nota de alcance:
 
 - Se conservan explicitamente `WindDir_sin_23h_x`, `WindDir_cos_23h_x`, `wind_u` y `wind_v`.
-- El forecast real usa HRRR historico con fallback y puede devolver `NaN` cuando no hay disponibilidad de corrida/datos.
+- El forecast real usa fuente de forecast historica y puede devolver `NaN` cuando no hay disponibilidad de corrida/datos.
 - Cobertura operativa recomendada para entrenamientos forecast-enabled: `2014-2026`.
 
 Conteo resultante esperado:
@@ -6323,14 +6323,14 @@ Se aplicaron cambios reales sobre `src/moira/features/build_climate_data.py` par
 - Se mantienen explícitamente:
   - `WindDir_sin_23h_x`, `WindDir_cos_23h_x`, `wind_u`, `wind_v`
 - Se removieron del output las 23 features de menor utilidad/degradantes definidas en este sprint.
-- Se agregaron 36 features de forecast real con prefijo `hrrr_`.
+- Se agregaron 36 features de forecast real con prefijo `forecast_`.
 
 Detalle de integración de forecast real:
 
-- Fuente principal: HRRR histórico (a través del endpoint histórico con modelo `ncep_hrrr`).
-- Fallback: `Open-Meteo` cuando no hay disponibilidad completa.
-- Comportamiento ante faltantes: las features HRRR pueden devolver `NaN` sin romper `strict=True`.
-- Para soportar eso, las nuevas `hrrr_*` quedaron registradas en `FEATURE_ALLOWED_MISSING`.
+- Fuente principal: forecast histórico (integración actual via endpoint de previous-runs).
+- Sin fallback adicional por defecto.
+- Comportamiento ante faltantes: las features de forecast pueden devolver `NaN` sin romper `strict=True`.
+- Para soportar eso, las nuevas `forecast_*` quedaron registradas en `FEATURE_ALLOWED_MISSING`.
 
 Validación funcional realizada tras los cambios:
 
